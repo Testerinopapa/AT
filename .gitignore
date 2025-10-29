@@ -1,1 +1,29 @@
+## Python Venv
 /venv/
+
+## Python files
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+*.egg
+*.dist-info
+*.whl
+*.pyc
+*.pyo
+*.pyd
+*.pyc
+*.pyo
+*.pyd
+*.pyc
+*.pyo
+*.pyd
+*.pyc
+*.pyo
+*.pyd
+*.pyc
+*.pyo
+*.pyd
+*.pyc
+*.pyo
+*pycache*
