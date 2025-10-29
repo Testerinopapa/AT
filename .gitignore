@@ -1,29 +1,236 @@
-## Python Venv
-/venv/
+# ==============================================
+# TraderBot .gitignore
+# ==============================================
 
-## Python files
-*.pyc
-*.pyo
-*.pyd
-*.egg-info
+# ============================================
+# Python
+# ============================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
 *.egg
-*.dist-info
-*.whl
-*.pyc
-*.pyo
-*.pyd
-*.pyc
-*.pyo
-*.pyd
-*.pyc
-*.pyo
-*.pyd
-*.pyc
-*.pyo
-*.pyd
-*.pyc
-*.pyo
-*.pyd
-*.pyc
-*.pyo
-*pycache*
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+.virtualenv/
+pythonenv*/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+test-results/
+junit/
+
+# ============================================
+# Trading Bot Specific
+# ============================================
+# Logs - keep directory structure but ignore log files
+logs/*.log
+logs/*.txt
+logs/*.csv
+logs/**/*.log
+logs/**/*.txt
+logs/**/*.csv
+
+# Configuration - sensitive data
+config/settings.local.json
+config/secrets.json
+config/*.key
+config/*.pem
+config/credentials.json
+config/.env
+
+# Trading data
+data/
+historical_data/
+backtest_results/
+*.h5
+*.hdf5
+*.parquet
+
+# ML Models
+models/*.pkl
+models/*.h5
+models/*.pt
+models/*.pth
+models/*.onnx
+models/*.joblib
+models/checkpoints/
+models/saved_models/
+*.model
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================
+# IDE & Editors
+# ============================================
+# VSCode
+.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+notebooks/.ipynb_checkpoints/
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================
+# Operating System
+# ============================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ============================================
+# Environment & Secrets
+# ============================================
+.env
+.env.local
+.env.*.local
+*.env
+.envrc
+
+# API Keys and credentials
+*secret*
+*credential*
+*password*
+*.key
+*.pem
+*.crt
+*.cer
+*.p12
+*.pfx
+
+# ============================================
+# Temporary & Cache
+# ============================================
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.cache/
+tmp/
+temp/
+*.bak
+*.backup
+
+# ============================================
+# Documentation (generated)
+# ============================================
+docs/_build/
+docs/.doctrees/
+site/
+
+# ============================================
+# CI/CD & Deployment
+# ============================================
+.github/workflows/*.log
+deployment/
+*.deploy
+
+# ============================================
+# Monitoring & Analytics
+# ============================================
+*.log
+*.out
+*.pid
+performance_reports/
+analytics/
+
+# ============================================
+# Miscellaneous
+# ============================================
+# Compressed files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Keep directory structure
+!.gitkeep
+!logs/.gitkeep
+!data/.gitkeep
+!models/.gitkeep

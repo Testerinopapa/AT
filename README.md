@@ -1,0 +1,409 @@
+# TraderBot Usage Guide
+
+Complete guide for using the TraderBot MetaTrader 5 automated trading system.
+
+## Table of Contents
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Running the Bot](#running-the-bot)
+- [Trading Modes](#trading-modes)
+- [Monitoring](#monitoring)
+- [Safety Features](#safety-features)
+- [Troubleshooting](#troubleshooting)
+
+## Installation
+
+### Prerequisites
+- Python 3.12 or higher
+- MetaTrader 5 terminal installed and logged in
+- Demo or live trading account
+
+### Setup Steps
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/STHS24/AT.git
+   cd TraderBot
+   ```
+
+2. **Create virtual environment**
+   ```bash
+   python -m venv venv
+   ```
+
+3. **Activate virtual environment**
+   - Windows:
+     ```bash
+     venv\Scripts\activate
+     ```
+   - Linux/Mac:
+     ```bash
+     source venv/bin/activate
+     ```
+
+4. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+5. **Verify installation**
+   ```bash
+   pytest tests/ -v
+   ```
+
+## Configuration
+
+### Configuration File: `config/settings.json`
+
+```json
+{
+  "symbol": "EURUSD",
+  "volume": 0.1,
+  "deviation": 50,
+  "trade_interval_seconds": 300,
+  "max_concurrent_trades": 3,
+  "enable_continuous_trading": false
+}
+```
+
+### Configuration Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `symbol` | string | "EURUSD" | Trading symbol (e.g., EURUSD, GBPUSD, USDJPY) |
+| `volume` | float | 0.1 | Trade volume in lots |
+| `deviation` | integer | 50 | Maximum price deviation in points |
+| `trade_interval_seconds` | integer | 300 | Time between trading checks (seconds) |
+| `max_concurrent_trades` | integer | 3 | Maximum number of open positions |
+| `enable_continuous_trading` | boolean | false | Enable continuous trading mode |
+
+### Recommended Settings
+
+#### Conservative (Demo/Learning)
+```json
+{
+  "symbol": "EURUSD",
+  "volume": 0.01,
+  "deviation": 50,
+  "trade_interval_seconds": 600,
+  "max_concurrent_trades": 1,
+  "enable_continuous_trading": false
+}
+```
+
+#### Moderate (Experienced Traders)
+```json
+{
+  "symbol": "EURUSD",
+  "volume": 0.1,
+  "deviation": 50,
+  "trade_interval_seconds": 300,
+  "max_concurrent_trades": 3,
+  "enable_continuous_trading": true
+}
+```
+
+#### Aggressive (Advanced Only)
+```json
+{
+  "symbol": "EURUSD",
+  "volume": 0.5,
+  "deviation": 100,
+  "trade_interval_seconds": 60,
+  "max_concurrent_trades": 5,
+  "enable_continuous_trading": true
+}
+```
+
+## Running the Bot
+
+### Single Trade Mode (Default)
+
+Execute one trade and exit:
+
+```bash
+python main.py
+```
+
+**Use case**: Testing, manual control, scheduled tasks
+
+### Continuous Trading Mode
+
+Enable in `config/settings.json`:
+```json
+{
+  "enable_continuous_trading": true
+}
+```
+
+Then run:
+```bash
+python main.py
+```
+
+**Use case**: Automated 24/7 trading
+
+### Stopping the Bot
+
+Press `CTRL+C` to gracefully shutdown:
+```
+⚠️  Shutdown signal received. Closing positions and exiting gracefully...
+🔚 Shutting down after 42 iterations...
+   Closing MT5 connection...
+✅ Shutdown complete.
+```
+
+## Trading Modes
+
+### Mode 1: Single Trade Execution
+
+**Behavior:**
+1. Connect to MT5
+2. Check strategy signal
+3. Execute one trade (if signal present)
+4. Disconnect and exit
+
+**Configuration:**
+```json
+{
+  "enable_continuous_trading": false
+}
+```
+
+**Best for:**
+- Testing strategies
+- Manual control
+- Scheduled execution (cron/Task Scheduler)
+
+### Mode 2: Continuous Trading Loop
+
+**Behavior:**
+1. Connect to MT5
+2. Loop indefinitely:
+   - Check for existing positions
+   - Get strategy signal
+   - Execute trade if conditions met
+   - Wait for configured interval
+3. Graceful shutdown on CTRL+C
+
+**Configuration:**
+```json
+{
+  "enable_continuous_trading": true,
+  "trade_interval_seconds": 300
+}
+```
+
+**Best for:**
+- Automated trading
+- 24/7 operation
+- Production environments
+
+## Monitoring
+
+### Console Output
+
+The bot provides real-time feedback:
+
+```
+🔌 Initializing MetaTrader 5...
+✅ Connected to account #12345678 | Balance: 10000.00
+
+✅ Symbol EURUSD ready for trading.
+
+============================================================
+🔄 Trading iteration at 2025-10-29 18:45:30
+============================================================
+[Strategy] Detected upward momentum → BUY signal.
+📤 Sending BUY trade request...
+
+✅ BUY executed successfully!
+   Ticket: 123456789
+   Price:  1.16045
+   SL:     1.15945
+   TP:     1.16245
+
+📊 Open positions: 1/3
+
+⏳ Waiting 300 seconds until next check...
+```
+
+### Log Files
+
+All trades are logged to `logs/trades.log`:
+
+```
+2025-10-29 18:45:30 | BUY          | 123456789    | Price: 1.16045 | SL: 1.15945 | TP: 1.16245 | Retcode: 10009
+2025-10-29 18:50:45 | SELL         | 123456790    | Price: 1.16025 | SL: 1.16125 | TP: 1.15825 | Retcode: 10009
+2025-10-29 18:55:12 | BUY_FAILED   | 0            | Price: 1.16050 | SL: 1.15950 | TP: 1.16250 | Retcode: 10030
+```
+
+### Monitoring Checklist
+
+- ✅ Check console for errors
+- ✅ Monitor `logs/trades.log` for trade history
+- ✅ Verify MT5 terminal shows correct positions
+- ✅ Check account balance regularly
+- ✅ Review strategy performance weekly
+
+## Safety Features
+
+### 1. Position Tracking
+- **Prevents duplicate trades** on the same symbol
+- Checks for existing positions before opening new ones
+
+### 2. Max Concurrent Trades
+- **Limits total open positions** to configured maximum
+- Prevents overexposure and excessive risk
+
+### 3. Graceful Shutdown
+- **CTRL+C handling** for clean exit
+- Properly closes MT5 connection
+- No orphaned processes
+
+### 4. Error Handling
+- **Connection validation** before trading
+- **Symbol verification** before execution
+- **Order result checking** with detailed logging
+
+### 5. Trade Logging
+- **Complete audit trail** of all trades
+- **Success and failure logging**
+- **Timestamp and price recording**
+
+## Troubleshooting
+
+### Issue: "MT5 initialization failed"
+
+**Cause**: MetaTrader 5 not running or not logged in
+
+**Solution**:
+1. Open MetaTrader 5 terminal
+2. Log in to your account
+3. Ensure terminal is not minimized
+4. Run the bot again
+
+### Issue: "Could not select symbol EURUSD"
+
+**Cause**: Symbol not available in your broker's market watch
+
+**Solution**:
+1. Open MT5 Market Watch (CTRL+M)
+2. Right-click → "Show All"
+3. Find your symbol and enable it
+4. Or change symbol in `config/settings.json`
+
+### Issue: "Already have an open position"
+
+**Cause**: Position tracking preventing duplicate trades
+
+**Solution**:
+- This is **normal behavior** (safety feature)
+- Close existing position in MT5 if you want to open new one
+- Or wait for position to close automatically (SL/TP)
+
+### Issue: "Max concurrent trades reached"
+
+**Cause**: Hit the configured limit for open positions
+
+**Solution**:
+- Close some positions manually
+- Or increase `max_concurrent_trades` in config
+- Or wait for positions to close automatically
+
+### Issue: Trade execution failed (Retcode: 10030)
+
+**Cause**: Invalid stops (SL/TP too close to market price)
+
+**Solution**:
+- Check broker's minimum stop level
+- Adjust SL/TP calculation in `main.py`
+- Increase deviation in config
+
+### Issue: "No trade signal from strategy"
+
+**Cause**: Strategy conditions not met
+
+**Solution**:
+- This is **normal behavior**
+- Strategy only trades when conditions are favorable
+- Wait for next iteration in continuous mode
+
+## Best Practices
+
+### 1. Start with Demo Account
+- Test thoroughly before using real money
+- Verify strategy performance
+- Understand bot behavior
+
+### 2. Use Conservative Settings
+- Start with small volume (0.01 lots)
+- Limit concurrent trades (1-2)
+- Longer intervals (5-10 minutes)
+
+### 3. Monitor Regularly
+- Check logs daily
+- Review performance weekly
+- Adjust settings based on results
+
+### 4. Backup Configuration
+- Keep backup of `config/settings.json`
+- Document any custom changes
+- Version control your modifications
+
+### 5. Test After Updates
+- Run test suite after any changes
+- Verify on demo account first
+- Monitor closely after deployment
+
+## Advanced Usage
+
+### Running as Windows Service
+
+Use Task Scheduler to run bot automatically:
+
+1. Open Task Scheduler
+2. Create Basic Task
+3. Set trigger (e.g., "At startup")
+4. Action: Start a program
+   - Program: `D:\Projects\TraderBot\venv\Scripts\python.exe`
+   - Arguments: `main.py`
+   - Start in: `D:\Projects\TraderBot`
+
+### Running as Linux Service
+
+Create systemd service file `/etc/systemd/system/traderbot.service`:
+
+```ini
+[Unit]
+Description=TraderBot MT5 Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/home/youruser/TraderBot
+ExecStart=/home/youruser/TraderBot/venv/bin/python main.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo systemctl enable traderbot
+sudo systemctl start traderbot
+sudo systemctl status traderbot
+```
+
+## Support
+
+- **Issues**: https://github.com/STHS24/AT/issues
+- **Documentation**: See ROADMAP.md for planned features
+- **Tests**: Run `pytest tests/ -v` to verify functionality
+
+## Disclaimer
+
+**Trading involves risk. This bot is provided as-is without any guarantees. Always test on demo accounts first. Never trade with money you cannot afford to lose.**
+

@@ -1,5 +1,8 @@
 {
   "symbol": "EURUSD",
   "volume": 0.1,
-  "deviation": 50
+  "deviation": 50,
+  "trade_interval_seconds": 60,
+  "max_concurrent_trades": 3,
+  "enable_continuous_trading": true
 }
