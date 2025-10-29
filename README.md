@@ -5,6 +5,7 @@ Complete guide for using the TraderBot MetaTrader 5 automated trading system.
 ## Table of Contents
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Trading Strategies](#trading-strategies)
 - [Running the Bot](#running-the-bot)
 - [Trading Modes](#trading-modes)
 - [Monitoring](#monitoring)
@@ -114,6 +115,105 @@ Complete guide for using the TraderBot MetaTrader 5 automated trading system.
   "enable_continuous_trading": true
 }
 ```
+
+## Trading Strategies
+
+The bot uses a **multi-strategy system** that combines signals from multiple technical analysis strategies.
+
+### Available Strategies
+
+| Strategy | Type | Description | Default Weight |
+|----------|------|-------------|----------------|
+| **SimpleStrategy** | Momentum | Compares last two candle closes | 1.0 |
+| **MAStrategy** | Trend | Moving Average Crossover (Golden/Death Cross) | 1.5 |
+| **RSIStrategy** | Oscillator | RSI Overbought/Oversold detection | 1.2 |
+| **MACDStrategy** | Momentum | MACD crossover with signal line | 1.0 |
+
+### Strategy Configuration
+
+Add `strategy_config` section to `config/settings.json`:
+
+```json
+{
+  "symbol": "EURUSD",
+  "volume": 0.1,
+  "trade_interval_seconds": 60,
+  "max_concurrent_trades": 10,
+  "enable_continuous_trading": true,
+
+  "strategy_config": {
+    "combination_method": "majority",
+    "enabled_strategies": ["SimpleStrategy", "MAStrategy", "RSIStrategy"],
+
+    "SimpleStrategy": {
+      "enabled": true,
+      "weight": 1.0,
+      "params": {
+        "timeframe": "M1",
+        "lookback": 20
+      }
+    },
+
+    "MAStrategy": {
+      "enabled": true,
+      "weight": 1.5,
+      "params": {
+        "timeframe": "M5",
+        "fast_period": 10,
+        "slow_period": 20,
+        "ma_type": "EMA"
+      }
+    },
+
+    "RSIStrategy": {
+      "enabled": true,
+      "weight": 1.2,
+      "params": {
+        "timeframe": "M5",
+        "period": 14,
+        "oversold": 30,
+        "overbought": 70
+      }
+    },
+
+    "MACDStrategy": {
+      "enabled": false,
+      "weight": 1.0,
+      "params": {
+        "timeframe": "M15",
+        "fast_period": 12,
+        "slow_period": 26,
+        "signal_period": 9
+      }
+    }
+  }
+}
+```
+
+### Combination Methods
+
+The bot combines signals from multiple strategies using one of four methods:
+
+| Method | Description | Use Case |
+|--------|-------------|----------|
+| **unanimous** | All strategies must agree | High confidence, low frequency |
+| **majority** | Most common signal wins (>50%) | Balanced approach |
+| **weighted** | Signals weighted by importance | Customizable, requires tuning |
+| **any** | Any strategy signal triggers action | High frequency, aggressive |
+
+**Example Output:**
+```
+[SimpleStrategy] Upward momentum detected → BUY signal
+[MAStrategy] No crossover (fast above slow) → NONE
+[RSIStrategy] RSI in neutral zone (57.40) → NONE
+
+[StrategyManager] Individual signals: {'SimpleStrategy': 'BUY', 'MAStrategy': 'NONE', 'RSIStrategy': 'NONE'}
+[StrategyManager] Combined signal (majority): BUY
+```
+
+### Strategy Details
+
+For detailed information about each strategy, see [`strategies/README.md`](strategies/README.md).
 
 ## Running the Bot
 

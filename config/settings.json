@@ -3,6 +3,53 @@
   "volume": 0.1,
   "deviation": 50,
   "trade_interval_seconds": 60,
-  "max_concurrent_trades": 3,
-  "enable_continuous_trading": true
+  "max_concurrent_trades": 10,
+  "enable_continuous_trading": true,
+
+  "strategy_config": {
+    "combination_method": "majority",
+    "enabled_strategies": ["SimpleStrategy", "MAStrategy", "RSIStrategy"],
+
+    "SimpleStrategy": {
+      "enabled": true,
+      "weight": 1.0,
+      "params": {
+        "timeframe": "M1",
+        "lookback": 20
+      }
+    },
+
+    "MAStrategy": {
+      "enabled": true,
+      "weight": 1.5,
+      "params": {
+        "timeframe": "M5",
+        "fast_period": 10,
+        "slow_period": 20,
+        "ma_type": "EMA"
+      }
+    },
+
+    "RSIStrategy": {
+      "enabled": true,
+      "weight": 1.2,
+      "params": {
+        "timeframe": "M5",
+        "period": 14,
+        "oversold": 30,
+        "overbought": 70
+      }
+    },
+
+    "MACDStrategy": {
+      "enabled": false,
+      "weight": 1.0,
+      "params": {
+        "timeframe": "M15",
+        "fast_period": 12,
+        "slow_period": 26,
+        "signal_period": 9
+      }
+    }
+  }
 }

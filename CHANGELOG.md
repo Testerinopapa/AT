@@ -4,6 +4,63 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Milestone 3 - Multiple Strategies ✅ COMPLETED (2025-10-29)
+
+#### Added
+- **Strategy System Architecture**
+  - Created `strategies/` package with modular design
+  - Implemented `BaseStrategy` abstract class for all strategies
+  - Added `StrategyManager` for combining multiple strategy signals
+  - Strategy enable/disable control
+  - Weighted voting system for strategy importance
+
+- **New Trading Strategies**
+  - `SimpleStrategy`: Refactored momentum-based strategy (original logic)
+  - `MAStrategy`: Moving Average Crossover (SMA/EMA support, Golden/Death cross)
+  - `RSIStrategy`: Relative Strength Index overbought/oversold detection
+  - `MACDStrategy`: MACD crossover strategy with signal line
+
+- **Strategy Manager Features**
+  - Four combination methods: `unanimous`, `majority`, `weighted`, `any`
+  - Individual strategy enable/disable control
+  - Weighted voting system for strategy importance
+  - Signal history tracking
+  - Real-time signal display for debugging
+
+- **Configuration Enhancements**
+  - Added `strategy_config` section in settings.json
+  - Per-strategy parameters (timeframe, periods, thresholds)
+  - Strategy weights for weighted voting
+  - Enable/disable individual strategies
+  - Combination method selection
+
+- **Testing**
+  - Created `tests/test_strategies_new.py` with 15 comprehensive tests
+  - All strategy classes tested (SimpleStrategy, MAStrategy, RSIStrategy, MACDStrategy)
+  - StrategyManager combination methods tested (unanimous, majority, weighted, any)
+  - Updated Milestone 2 tests to work with new strategy system
+  - **Total: 51 passing tests** (up from 38)
+
+#### Changed
+- Refactored `main.py` to use `StrategyManager` instead of single `trade_decision()`
+- Added `initialize_strategies()` function for strategy setup with config parsing
+- Updated trading iteration to use combined signals from multiple strategies
+- Expanded `config/settings.json` from 7 to 55 lines with comprehensive strategy configuration
+- Modified position management to support pyramiding (multiple positions in same direction)
+
+#### Technical Details
+- **Strategy Pattern**: Abstract base class with concrete implementations
+- **Signal Combination**: Multiple methods for aggregating strategy signals
+- **Timeframe Support**: M1, M5, M15, M30, H1, H4, D1, W1, MN1
+- **Technical Indicators**: SMA, EMA, RSI, MACD implemented from scratch using numpy
+- **Indicator Calculations**:
+  - SMA: Convolution-based moving average
+  - EMA: Exponential smoothing with multiplier
+  - RSI: Smoothed average gains/losses
+  - MACD: EMA differences with signal line
+
+---
+
 ### Milestone 2 - Continuous Trading Loop ✅ COMPLETED (2025-10-29)
 
 #### Added

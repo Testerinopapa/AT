@@ -5,7 +5,15 @@ import os
 import time
 import signal
 from datetime import datetime
-from strategy import trade_decision
+
+# Import new strategy system
+from strategies import (
+    SimpleStrategy,
+    MAStrategy,
+    RSIStrategy,
+    MACDStrategy,
+    StrategyManager
+)
 
 # ------------------------------
 # GLOBAL STATE
@@ -47,6 +55,77 @@ ENABLE_CONTINUOUS = config.get("enable_continuous_trading", False)
 
 # Ensure logs folder exists
 os.makedirs("logs", exist_ok=True)
+
+
+# ------------------------------
+# STRATEGY INITIALIZATION
+# ------------------------------
+def initialize_strategies():
+    """
+    Initialize trading strategies from configuration.
+
+    Returns:
+        StrategyManager: Configured strategy manager
+    """
+    strategy_config = config.get("strategy_config", {})
+    combination_method = strategy_config.get("combination_method", "majority")
+
+    # Map timeframe strings to MT5 constants
+    timeframe_map = {
+        "M1": mt5.TIMEFRAME_M1,
+        "M5": mt5.TIMEFRAME_M5,
+        "M15": mt5.TIMEFRAME_M15,
+        "M30": mt5.TIMEFRAME_M30,
+        "H1": mt5.TIMEFRAME_H1,
+        "H4": mt5.TIMEFRAME_H4,
+        "D1": mt5.TIMEFRAME_D1
+    }
+
+    # Create strategy manager
+    manager = StrategyManager(method=combination_method)
+
+    # Strategy class mapping
+    strategy_classes = {
+        "SimpleStrategy": SimpleStrategy,
+        "MAStrategy": MAStrategy,
+        "RSIStrategy": RSIStrategy,
+        "MACDStrategy": MACDStrategy
+    }
+
+    # Initialize each configured strategy
+    for strategy_name, strategy_class in strategy_classes.items():
+        strategy_settings = strategy_config.get(strategy_name, {})
+
+        if not strategy_settings:
+            continue
+
+        # Get parameters and convert timeframe strings
+        params = strategy_settings.get("params", {}).copy()
+        if "timeframe" in params and isinstance(params["timeframe"], str):
+            params["timeframe"] = timeframe_map.get(params["timeframe"], mt5.TIMEFRAME_M5)
+
+        # Create strategy instance
+        strategy = strategy_class(params)
+
+        # Set enabled state
+        if not strategy_settings.get("enabled", True):
+            strategy.disable()
+
+        # Set weight
+        weight = strategy_settings.get("weight", 1.0)
+        strategy.set_weight(weight)
+
+        # Add to manager
+        manager.add_strategy(strategy)
+
+    print(f"\n[Config] Strategy Manager initialized: {manager}")
+    print(f"[Config] Active strategies: {len([s for s in manager.strategies if s.enabled])}/{len(manager.strategies)}")
+
+    return manager
+
+
+# Initialize strategy manager
+STRATEGY_MANAGER = initialize_strategies()
 
 # ------------------------------
 # HELPER FUNCTIONS
@@ -265,8 +344,8 @@ def trading_iteration(symbol):
     print(f"🔄 Trading iteration at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}")
 
-    # Get strategy decision
-    action = trade_decision(symbol)
+    # Get combined strategy decision
+    action = STRATEGY_MANAGER.generate_combined_signal(symbol)
 
     if action not in ["BUY", "SELL"]:
         print("⚠️  No trade signal from strategy.")

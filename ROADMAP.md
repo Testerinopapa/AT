@@ -16,18 +16,18 @@ A roadmap to build a full-featured AI trading bot with MetaTrader 5 in Python.
 - [x] Add safe handling for "no signal" (do nothing)
 
 ## Milestone 2 – Continuous Trading Loop
-- [ ] Add a scheduler loop in main.py (check every 1–5 minutes)
-- [ ] Avoid duplicate trades: track open positions with mt5.positions_get()
-- [ ] Configurable trade interval in config/settings.json
-- [ ] Graceful shutdown handling (CTRL+C)
+- [x] Add a scheduler loop in main.py (check every 1–5 minutes)
+- [x] Avoid duplicate trades: track open positions with mt5.positions_get()
+- [x] Configurable trade interval in config/settings.json
+- [x] Graceful shutdown handling (CTRL+C)
 
 ## Milestone 3 – Multiple Strategies
-- [ ] Move SimpleStrategy into a class in strategy.py
-- [ ] Add new strategies:
+- [x] Move SimpleStrategy into a class in strategy.py
+- [x] Add new strategies:
   - Moving Average Crossover
   - RSI threshold
   - MACD signals
-- [ ] Strategy manager: combine multiple strategies to decide overall BUY/SELL/NONE
+- [x] Strategy manager: combine multiple strategies to decide overall BUY/SELL/NONE
 - [ ] Unit tests for each strategy (tests/test_strategy.py)
 
 ## Milestone 4 – AI / ML Integration
@@ -46,7 +46,7 @@ A roadmap to build a full-featured AI trading bot with MetaTrader 5 in Python.
 - [ ] Logging P/L for analysis
 
 ## Milestone 6 – Logging & Analytics
-- [ ] Save trades in logs/trades.log with timestamps, action, price, SL, TP
+- [x] Save trades in logs/trades.log with timestamps, action, price, SL, TP
 - [ ] Optional: store logs in CSV/SQLite for analysis
 - [ ] Generate performance reports:
   - Win rate
