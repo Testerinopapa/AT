@@ -6,6 +6,65 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.6.0] - 2025-10-29
+
+### Milestone 6: Logging & Analytics ✅ COMPLETED
+
+This release implements enhanced logging and comprehensive performance analytics.
+
+#### Added
+
+**Enhanced Trade Logger (`trade_logger.py`)**
+- **Multi-format Logging**: Simultaneous logging to text file, CSV, and SQLite database
+- **Comprehensive Trade Data**: 20+ fields including timestamp, symbol, action, prices, P/L, commission, swap, duration, strategy
+- **Trade Lifecycle Tracking**: Separate methods for trade open and close events
+- **Automatic R/R Calculation**: Calculates risk/reward ratio for each trade
+- **Database Indexes**: Fast querying by timestamp, symbol, action, status
+
+**Performance Analytics (`analytics.py`)**
+- **Comprehensive Reports**: Generate detailed performance reports with statistics
+- **Basic Statistics**: Total trades, win rate, profit factor, average P/L, max profit/loss
+- **Strategy Performance**: Compare performance across different strategies
+- **Time-Based Analysis**: Daily and hourly performance breakdown
+- **Risk Metrics**: Max drawdown, Sharpe ratio, consecutive wins/losses
+- **Best/Worst Trades**: Track top 5 best and worst performing trades
+- **Report Export**: Save reports to JSON format in `logs/reports/`
+- **Console Display**: Formatted summary reports printed to console
+
+**Database Storage**
+- **SQLite Database**: Efficient storage in `logs/trades.db`
+- **Structured Schema**: 21 fields with proper data types
+- **Trade Updates**: Support for updating trades from OPEN to CLOSED status
+- **Query Optimization**: Indexes for fast filtering and aggregation
+
+**CSV Export**
+- **Automatic Export**: All trades exported to `logs/trades.csv`
+- **Excel Compatible**: Easy import into Excel or data analysis tools
+- **Real-time Updates**: CSV updated as trades occur
+
+**Testing**
+- **12 New Tests**: Comprehensive test coverage for logging and analytics
+- **Database Testing**: Tests for schema, inserts, updates, queries
+- **Report Testing**: Tests for all report generation features
+- **Edge Cases**: Tests for empty database, missing data
+
+#### Changed
+- **Updated `main.py`**: Integrated new `TradeLogger` and `PerformanceAnalytics`
+- **Enhanced `log_trade()`**: Now logs to multiple formats with strategy name
+- **Updated `execute_trade()`**: Logs trade opening with full details
+- **Updated `close_position()`**: Logs trade closure with P/L, commission, swap
+- **Shutdown Report**: Performance report generated and displayed on bot shutdown
+
+#### Technical Details
+- **Total Tests**: 86 passing tests (12 new for logging/analytics)
+- **New Modules**: `trade_logger.py` (300 lines), `analytics.py` (300 lines)
+- **New Test File**: `tests/test_logging_analytics.py` (349 lines)
+- **Database Location**: `logs/trades.db`
+- **CSV Location**: `logs/trades.csv`
+- **Reports Directory**: `logs/reports/`
+
+---
+
 ## [0.5.0] - 2025-10-29
 
 ### Milestone 5: Risk Management ✅ COMPLETED

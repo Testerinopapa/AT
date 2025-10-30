@@ -18,6 +18,10 @@ from strategies import (
 # Import risk management
 from risk_manager import RiskManager
 
+# Import logging and analytics
+from trade_logger import TradeLogger
+from analytics import PerformanceAnalytics
+
 # ------------------------------
 # GLOBAL STATE
 # ------------------------------
@@ -137,6 +141,11 @@ print(f"[Config] Risk per trade: {RISK_MANAGER.risk_percentage}%")
 print(f"[Config] SL/TP method: {RISK_MANAGER.sl_method}/{RISK_MANAGER.tp_method}")
 print(f"[Config] Daily limits: Loss=${RISK_MANAGER.daily_loss_limit}, Profit=${RISK_MANAGER.daily_profit_target}")
 
+# Initialize Trade Logger and Analytics
+TRADE_LOGGER = TradeLogger()
+ANALYTICS = PerformanceAnalytics()
+print(f"[Config] Trade Logger and Analytics initialized")
+
 # ------------------------------
 # HELPER FUNCTIONS
 # ------------------------------
@@ -214,8 +223,32 @@ def can_open_new_trade():
     all_positions = get_open_positions()
     return len(all_positions) < MAX_CONCURRENT_TRADES
 
-def log_trade(action, result, price, sl, tp):
-    """Log trade execution to file."""
+def log_trade(action, result, volume, price, sl, tp, strategy="Combined"):
+    """
+    Log trade execution using enhanced logger.
+
+    Args:
+        action: Trade action (BUY/SELL)
+        result: MT5 order result
+        volume: Trade volume
+        price: Entry price
+        sl: Stop loss
+        tp: Take profit
+        strategy: Strategy name
+    """
+    # Use new enhanced logger
+    TRADE_LOGGER.log_trade_open(
+        symbol=SYMBOL,
+        action=action,
+        result=result,
+        volume=volume,
+        entry_price=price,
+        sl=sl,
+        tp=tp,
+        strategy=strategy
+    )
+
+    # Also keep old format for backward compatibility
     with open(LOG_PATH, "a") as f:
         f.write(
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
@@ -313,11 +346,14 @@ def execute_trade(symbol, action):
         print(f"   Price:  {result.price}")
         print(f"   SL:     {sl}")
         print(f"   TP:     {tp}")
-        log_trade(action, result, price, sl, tp)
+
+        # Get strategy name from manager
+        strategy_name = STRATEGY_MANAGER.method.upper()
+        log_trade(action, result, volume, price, sl, tp, strategy=strategy_name)
         return True
     else:
         print(f"\n❌ {action} failed! Code {result.retcode}: {result.comment}")
-        log_trade(f"{action}_FAILED", result, price, sl, tp)
+        log_trade(f"{action}_FAILED", result, volume, price, sl, tp, strategy="FAILED")
         return False
 
 
@@ -364,7 +400,19 @@ def close_position(position):
 
     if result.retcode == mt5.TRADE_RETCODE_DONE:
         profit = position.profit
+        commission = position.commission if hasattr(position, 'commission') else 0
+        swap = position.swap if hasattr(position, 'swap') else 0
+
         print(f"✅ Position #{position.ticket} closed | Profit: {profit:.2f}")
+
+        # Log trade close
+        TRADE_LOGGER.log_trade_close(
+            ticket=position.ticket,
+            exit_price=close_price,
+            profit=profit,
+            commission=commission,
+            swap=swap
+        )
 
         # Update daily P/L tracking
         RISK_MANAGER.update_daily_pnl(profit)
@@ -494,7 +542,17 @@ def run_continuous_trading():
 
     finally:
         print(f"\n🔚 Shutting down after {iteration_count} iterations...")
-        print("   Closing MT5 connection...")
+
+        # Generate and display performance report
+        try:
+            print("\n" + "="*80)
+            print("📊 GENERATING PERFORMANCE REPORT...")
+            print("="*80)
+            ANALYTICS.print_summary_report(days=7)
+        except Exception as e:
+            print(f"⚠️  Could not generate performance report: {e}")
+
+        print("\n   Closing MT5 connection...")
         mt5.shutdown()
         print("✅ Shutdown complete.")
 

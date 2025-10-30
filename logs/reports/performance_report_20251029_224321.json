@@ -1,0 +1,37 @@
+{
+  "report_date": "2025-10-29 22:43:21",
+  "period_days": 7,
+  "basic_statistics": {
+    "total_trades": 0,
+    "winning_trades": 0,
+    "losing_trades": 0,
+    "breakeven_trades": 0,
+    "win_rate_percent": 0,
+    "total_pnl": 0,
+    "average_pnl": 0,
+    "max_profit": 0,
+    "max_loss": 0,
+    "average_win": 0,
+    "average_loss": 0,
+    "gross_profit": 0,
+    "gross_loss": 0,
+    "profit_factor": 0,
+    "average_duration_seconds": 0
+  },
+  "strategy_performance": {},
+  "time_analysis": {
+    "daily_performance": [],
+    "hourly_performance": {}
+  },
+  "risk_metrics": {
+    "max_drawdown": 0,
+    "max_drawdown_percent": 0,
+    "sharpe_ratio": 0,
+    "consecutive_wins": 0,
+    "consecutive_losses": 0
+  },
+  "best_worst_trades": {
+    "best_trades": [],
+    "worst_trades": []
+  }
+}

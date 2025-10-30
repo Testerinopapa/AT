@@ -456,21 +456,95 @@ The bot provides real-time feedback:
 
 ### Log Files
 
-All trades are logged to `logs/trades.log`:
+The bot maintains multiple log formats for comprehensive tracking:
 
+**1. Text Log** (`logs/trades.log`)
 ```
 2025-10-29 18:45:30 | BUY          | 123456789    | Price: 1.16045 | SL: 1.15945 | TP: 1.16245 | Retcode: 10009
 2025-10-29 18:50:45 | SELL         | 123456790    | Price: 1.16025 | SL: 1.16125 | TP: 1.15825 | Retcode: 10009
 2025-10-29 18:55:12 | BUY_FAILED   | 0            | Price: 1.16050 | SL: 1.15950 | TP: 1.16250 | Retcode: 10030
 ```
 
+**2. CSV Export** (`logs/trades.csv`)
+- Excel-compatible format
+- All trade details in structured columns
+- Easy import for data analysis
+
+**3. SQLite Database** (`logs/trades.db`)
+- Efficient storage and querying
+- 20+ fields per trade
+- Supports complex analytics queries
+
+**4. Daily P/L Tracking** (`logs/daily_pnl.json`)
+```json
+{
+  "2025-10-29": {
+    "pnl": 156.90,
+    "trades": 67
+  }
+}
+```
+
+### Performance Analytics
+
+The bot includes comprehensive performance analytics:
+
+**Generate Performance Report**
+```python
+from analytics import PerformanceAnalytics
+
+analytics = PerformanceAnalytics()
+analytics.print_summary_report(days=30)
+```
+
+**Report Includes:**
+- **Basic Statistics**: Total trades, win rate, profit factor, average P/L
+- **Strategy Performance**: Performance breakdown by strategy
+- **Time Analysis**: Daily and hourly performance patterns
+- **Risk Metrics**: Max drawdown, Sharpe ratio, consecutive wins/losses
+- **Best/Worst Trades**: Top 5 best and worst performing trades
+
+**Automatic Report on Shutdown**
+When you stop the bot (CTRL+C), it automatically generates and displays a performance report:
+
+```
+================================================================================
+📊 PERFORMANCE REPORT - Last 7 Days
+================================================================================
+
+📈 BASIC STATISTICS
+   Total Trades: 45
+   Winning Trades: 28 (62.22%)
+   Losing Trades: 17
+   Total P/L: $1,245.50
+   Average P/L: $27.68
+   Profit Factor: 2.15
+
+⚠️  RISK METRICS
+   Max Drawdown: $125.00 (1.25%)
+   Sharpe Ratio: 1.85
+   Max Consecutive Wins: 7
+   Max Consecutive Losses: 3
+
+🎯 STRATEGY PERFORMANCE
+   MAJORITY:
+      Trades: 45 | Win Rate: 62.22% | P/L: $1,245.50
+================================================================================
+```
+
+**Saved Reports**
+All reports are automatically saved to `logs/reports/` in JSON format for later analysis.
+
 ### Monitoring Checklist
 
 - ✅ Check console for errors
 - ✅ Monitor `logs/trades.log` for trade history
+- ✅ Review `logs/trades.csv` for detailed analysis
+- ✅ Check `logs/daily_pnl.json` for daily performance
+- ✅ Generate performance reports weekly
 - ✅ Verify MT5 terminal shows correct positions
 - ✅ Check account balance regularly
-- ✅ Review strategy performance weekly
+- ✅ Review strategy performance metrics
 
 ## Safety Features
 

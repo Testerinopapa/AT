@@ -1,0 +1,76 @@
+{
+  "report_date": "2025-10-29 22:40:54",
+  "period_days": 7,
+  "basic_statistics": {
+    "total_trades": 1,
+    "winning_trades": 0,
+    "losing_trades": 1,
+    "breakeven_trades": 0,
+    "win_rate_percent": 0.0,
+    "total_pnl": -8.0,
+    "average_pnl": -8.0,
+    "max_profit": -8.0,
+    "max_loss": -8.0,
+    "average_win": 0,
+    "average_loss": -8.0,
+    "gross_profit": 0,
+    "gross_loss": 8.0,
+    "profit_factor": 0.0,
+    "average_duration_seconds": 61.0
+  },
+  "strategy_performance": {
+    "MAJORITY": {
+      "total_trades": 1,
+      "winning_trades": 0,
+      "win_rate_percent": 0.0,
+      "total_pnl": -8.0,
+      "average_pnl": -8.0
+    }
+  },
+  "time_analysis": {
+    "daily_performance": [
+      {
+        "date": "2025-10-29",
+        "trades": 1,
+        "pnl": -8.0
+      }
+    ],
+    "hourly_performance": {
+      "22:00": {
+        "trades": 1,
+        "pnl": -8.0
+      }
+    }
+  },
+  "risk_metrics": {
+    "max_drawdown": 0,
+    "max_drawdown_percent": 0,
+    "sharpe_ratio": 0,
+    "consecutive_wins": 0,
+    "consecutive_losses": 1
+  },
+  "best_worst_trades": {
+    "best_trades": [
+      {
+        "timestamp": "2025-10-29 22:35:14",
+        "symbol": "EURUSD",
+        "action": "SELL",
+        "entry_price": 1.16136,
+        "exit_price": 1.16144,
+        "profit": -8.0,
+        "strategy": "MAJORITY"
+      }
+    ],
+    "worst_trades": [
+      {
+        "timestamp": "2025-10-29 22:35:14",
+        "symbol": "EURUSD",
+        "action": "SELL",
+        "entry_price": 1.16136,
+        "exit_price": 1.16144,
+        "profit": -8.0,
+        "strategy": "MAJORITY"
+      }
+    ]
+  }
+}
