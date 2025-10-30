@@ -4,6 +4,181 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+---
+
+## [0.6.0] - 2025-10-29
+
+### Milestone 6: Logging & Analytics ✅ COMPLETED
+
+This release implements enhanced logging and comprehensive performance analytics.
+
+#### Added
+
+**Enhanced Trade Logger (`trade_logger.py`)**
+- **Multi-format Logging**: Simultaneous logging to text file, CSV, and SQLite database
+- **Comprehensive Trade Data**: 20+ fields including timestamp, symbol, action, prices, P/L, commission, swap, duration, strategy
+- **Trade Lifecycle Tracking**: Separate methods for trade open and close events
+- **Automatic R/R Calculation**: Calculates risk/reward ratio for each trade
+- **Database Indexes**: Fast querying by timestamp, symbol, action, status
+
+**Performance Analytics (`analytics.py`)**
+- **Comprehensive Reports**: Generate detailed performance reports with statistics
+- **Basic Statistics**: Total trades, win rate, profit factor, average P/L, max profit/loss
+- **Strategy Performance**: Compare performance across different strategies
+- **Time-Based Analysis**: Daily and hourly performance breakdown
+- **Risk Metrics**: Max drawdown, Sharpe ratio, consecutive wins/losses
+- **Best/Worst Trades**: Track top 5 best and worst performing trades
+- **Report Export**: Save reports to JSON format in `logs/reports/`
+- **Console Display**: Formatted summary reports printed to console
+
+**Database Storage**
+- **SQLite Database**: Efficient storage in `logs/trades.db`
+- **Structured Schema**: 21 fields with proper data types
+- **Trade Updates**: Support for updating trades from OPEN to CLOSED status
+- **Query Optimization**: Indexes for fast filtering and aggregation
+
+**CSV Export**
+- **Automatic Export**: All trades exported to `logs/trades.csv`
+- **Excel Compatible**: Easy import into Excel or data analysis tools
+- **Real-time Updates**: CSV updated as trades occur
+
+**Testing**
+- **12 New Tests**: Comprehensive test coverage for logging and analytics
+- **Database Testing**: Tests for schema, inserts, updates, queries
+- **Report Testing**: Tests for all report generation features
+- **Edge Cases**: Tests for empty database, missing data
+
+#### Changed
+- **Updated `main.py`**: Integrated new `TradeLogger` and `PerformanceAnalytics`
+- **Enhanced `log_trade()`**: Now logs to multiple formats with strategy name
+- **Updated `execute_trade()`**: Logs trade opening with full details
+- **Updated `close_position()`**: Logs trade closure with P/L, commission, swap
+- **Shutdown Report**: Performance report generated and displayed on bot shutdown
+
+#### Technical Details
+- **Total Tests**: 86 passing tests (12 new for logging/analytics)
+- **New Modules**: `trade_logger.py` (300 lines), `analytics.py` (300 lines)
+- **New Test File**: `tests/test_logging_analytics.py` (349 lines)
+- **Database Location**: `logs/trades.db`
+- **CSV Location**: `logs/trades.csv`
+- **Reports Directory**: `logs/reports/`
+
+---
+
+## [0.5.0] - 2025-10-29
+
+### Milestone 5: Risk Management ✅ COMPLETED
+
+This release implements comprehensive risk management features to protect capital and optimize position sizing.
+
+#### Added
+
+**Risk Management Module (`risk_manager.py`)**
+- **Dynamic Lot Sizing**: Automatically calculates optimal position size based on account balance, risk percentage, SL distance, and symbol specifications
+- **Automatic SL/TP Calculation**: Three methods available (ATR, fixed pips, percentage)
+- **ATR Calculation**: Volatility-based indicator with caching for performance
+- **Daily Loss/Profit Limits**: Auto-disable trading when limits reached (default: $500 loss, $1000 profit)
+- **P/L Tracking**: Persistent daily tracking in `logs/daily_pnl.json`
+- **Trade Validation**: Validates lot size, daily limits, and symbol constraints
+
+**Configuration Enhancements**
+- Added `risk_management` section with 26 new parameters
+- Risk percentages, lot size limits, SL/TP methods, ATR config, daily limits
+
+**Main Bot Integration**
+- Check daily limits before each trading iteration
+- Calculate dynamic lot sizes and SL/TP for each trade
+- Update daily P/L after closing positions
+- Display daily P/L status in each iteration
+
+**Testing**
+- Created `tests/test_risk_management.py` with 22 comprehensive tests
+- Updated `tests/test_milestone2.py` to properly mock RiskManager
+- All 74 tests passing
+
+#### Changed
+- `main.py`: Integrated RiskManager into execute_trade(), close_position(), and trading_iteration()
+- `config/settings.json`: Expanded from 55 to 81 lines with risk management config
+
+#### Technical Details
+- Dynamic lot sizing: `lot_size = risk_amount / (sl_pips × pip_value_per_lot)`
+- ATR: `True Range = max(H-L, |H-PrevC|, |L-PrevC|)`, `ATR = avg(TR over N periods)`
+- Three SL/TP methods: ATR-based, fixed pips, percentage
+
+#### Live Testing Results
+✅ Successfully tested with live MT5 connection:
+- Dynamic lot sizing: 1.0 lot for 34 pip SL ✓
+- ATR-based SL/TP working ✓
+- Daily P/L tracking: $1.90 profit tracked ✓
+- Daily limits check working ✓
+- Position closed and P/L updated ✓
+
+#### Files
+- Modified: `main.py` (+50 lines), `config/settings.json` (+26 lines), `tests/test_milestone2.py`
+- Created: `risk_manager.py` (300 lines), `tests/test_risk_management.py` (22 tests), `logs/daily_pnl.json`
+- Statistics: 74 passing tests, +350 lines of code
+
+---
+
+## [0.4.0] - 2025-10-29
+
+### Milestone 3 - Multiple Strategies ✅ COMPLETED
+
+#### Added
+- **Strategy System Architecture**
+  - Created `strategies/` package with modular design
+  - Implemented `BaseStrategy` abstract class for all strategies
+  - Added `StrategyManager` for combining multiple strategy signals
+  - Strategy enable/disable control
+  - Weighted voting system for strategy importance
+
+- **New Trading Strategies**
+  - `SimpleStrategy`: Refactored momentum-based strategy (original logic)
+  - `MAStrategy`: Moving Average Crossover (SMA/EMA support, Golden/Death cross)
+  - `RSIStrategy`: Relative Strength Index overbought/oversold detection
+  - `MACDStrategy`: MACD crossover strategy with signal line
+
+- **Strategy Manager Features**
+  - Four combination methods: `unanimous`, `majority`, `weighted`, `any`
+  - Individual strategy enable/disable control
+  - Weighted voting system for strategy importance
+  - Signal history tracking
+  - Real-time signal display for debugging
+
+- **Configuration Enhancements**
+  - Added `strategy_config` section in settings.json
+  - Per-strategy parameters (timeframe, periods, thresholds)
+  - Strategy weights for weighted voting
+  - Enable/disable individual strategies
+  - Combination method selection
+
+- **Testing**
+  - Created `tests/test_strategies_new.py` with 15 comprehensive tests
+  - All strategy classes tested (SimpleStrategy, MAStrategy, RSIStrategy, MACDStrategy)
+  - StrategyManager combination methods tested (unanimous, majority, weighted, any)
+  - Updated Milestone 2 tests to work with new strategy system
+  - **Total: 51 passing tests** (up from 38)
+
+#### Changed
+- Refactored `main.py` to use `StrategyManager` instead of single `trade_decision()`
+- Added `initialize_strategies()` function for strategy setup with config parsing
+- Updated trading iteration to use combined signals from multiple strategies
+- Expanded `config/settings.json` from 7 to 55 lines with comprehensive strategy configuration
+- Modified position management to support pyramiding (multiple positions in same direction)
+
+#### Technical Details
+- **Strategy Pattern**: Abstract base class with concrete implementations
+- **Signal Combination**: Multiple methods for aggregating strategy signals
+- **Timeframe Support**: M1, M5, M15, M30, H1, H4, D1, W1, MN1
+- **Technical Indicators**: SMA, EMA, RSI, MACD implemented from scratch using numpy
+- **Indicator Calculations**:
+  - SMA: Convolution-based moving average
+  - EMA: Exponential smoothing with multiplier
+  - RSI: Smoothed average gains/losses
+  - MACD: EMA differences with signal line
+
+---
+
 ### Milestone 2 - Continuous Trading Loop ✅ COMPLETED (2025-10-29)
 
 #### Added

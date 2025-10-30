@@ -5,7 +5,22 @@ import os
 import time
 import signal
 from datetime import datetime
-from strategy import trade_decision
+
+# Import new strategy system
+from strategies import (
+    SimpleStrategy,
+    MAStrategy,
+    RSIStrategy,
+    MACDStrategy,
+    StrategyManager
+)
+
+# Import risk management
+from risk_manager import RiskManager
+
+# Import logging and analytics
+from trade_logger import TradeLogger
+from analytics import PerformanceAnalytics
 
 # ------------------------------
 # GLOBAL STATE
@@ -47,6 +62,89 @@ ENABLE_CONTINUOUS = config.get("enable_continuous_trading", False)
 
 # Ensure logs folder exists
 os.makedirs("logs", exist_ok=True)
+
+
+# ------------------------------
+# STRATEGY INITIALIZATION
+# ------------------------------
+def initialize_strategies():
+    """
+    Initialize trading strategies from configuration.
+
+    Returns:
+        StrategyManager: Configured strategy manager
+    """
+    strategy_config = config.get("strategy_config", {})
+    combination_method = strategy_config.get("combination_method", "majority")
+
+    # Map timeframe strings to MT5 constants
+    timeframe_map = {
+        "M1": mt5.TIMEFRAME_M1,
+        "M5": mt5.TIMEFRAME_M5,
+        "M15": mt5.TIMEFRAME_M15,
+        "M30": mt5.TIMEFRAME_M30,
+        "H1": mt5.TIMEFRAME_H1,
+        "H4": mt5.TIMEFRAME_H4,
+        "D1": mt5.TIMEFRAME_D1
+    }
+
+    # Create strategy manager
+    manager = StrategyManager(method=combination_method)
+
+    # Strategy class mapping
+    strategy_classes = {
+        "SimpleStrategy": SimpleStrategy,
+        "MAStrategy": MAStrategy,
+        "RSIStrategy": RSIStrategy,
+        "MACDStrategy": MACDStrategy
+    }
+
+    # Initialize each configured strategy
+    for strategy_name, strategy_class in strategy_classes.items():
+        strategy_settings = strategy_config.get(strategy_name, {})
+
+        if not strategy_settings:
+            continue
+
+        # Get parameters and convert timeframe strings
+        params = strategy_settings.get("params", {}).copy()
+        if "timeframe" in params and isinstance(params["timeframe"], str):
+            params["timeframe"] = timeframe_map.get(params["timeframe"], mt5.TIMEFRAME_M5)
+
+        # Create strategy instance
+        strategy = strategy_class(params)
+
+        # Set enabled state
+        if not strategy_settings.get("enabled", True):
+            strategy.disable()
+
+        # Set weight
+        weight = strategy_settings.get("weight", 1.0)
+        strategy.set_weight(weight)
+
+        # Add to manager
+        manager.add_strategy(strategy)
+
+    print(f"\n[Config] Strategy Manager initialized: {manager}")
+    print(f"[Config] Active strategies: {len([s for s in manager.strategies if s.enabled])}/{len(manager.strategies)}")
+
+    return manager
+
+
+# Initialize strategy manager
+STRATEGY_MANAGER = initialize_strategies()
+
+# Initialize Risk Manager
+RISK_MANAGER = RiskManager(config)
+print(f"[Config] Risk Manager initialized")
+print(f"[Config] Risk per trade: {RISK_MANAGER.risk_percentage}%")
+print(f"[Config] SL/TP method: {RISK_MANAGER.sl_method}/{RISK_MANAGER.tp_method}")
+print(f"[Config] Daily limits: Loss=${RISK_MANAGER.daily_loss_limit}, Profit=${RISK_MANAGER.daily_profit_target}")
+
+# Initialize Trade Logger and Analytics
+TRADE_LOGGER = TradeLogger()
+ANALYTICS = PerformanceAnalytics()
+print(f"[Config] Trade Logger and Analytics initialized")
 
 # ------------------------------
 # HELPER FUNCTIONS
@@ -125,8 +223,32 @@ def can_open_new_trade():
     all_positions = get_open_positions()
     return len(all_positions) < MAX_CONCURRENT_TRADES
 
-def log_trade(action, result, price, sl, tp):
-    """Log trade execution to file."""
+def log_trade(action, result, volume, price, sl, tp, strategy="Combined"):
+    """
+    Log trade execution using enhanced logger.
+
+    Args:
+        action: Trade action (BUY/SELL)
+        result: MT5 order result
+        volume: Trade volume
+        price: Entry price
+        sl: Stop loss
+        tp: Take profit
+        strategy: Strategy name
+    """
+    # Use new enhanced logger
+    TRADE_LOGGER.log_trade_open(
+        symbol=SYMBOL,
+        action=action,
+        result=result,
+        volume=volume,
+        entry_price=price,
+        sl=sl,
+        tp=tp,
+        strategy=strategy
+    )
+
+    # Also keep old format for backward compatibility
     with open(LOG_PATH, "a") as f:
         f.write(
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
@@ -138,7 +260,7 @@ def log_trade(action, result, price, sl, tp):
 
 def execute_trade(symbol, action):
     """
-    Execute a trade based on the action signal.
+    Execute a trade based on the action signal with risk management.
 
     Args:
         symbol: Trading symbol
@@ -147,8 +269,11 @@ def execute_trade(symbol, action):
     Returns:
         Boolean indicating success
     """
-    # Determine order type
-    order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
+    # Check if trading is allowed (daily limits)
+    can_trade, reason = RISK_MANAGER.can_trade()
+    if not can_trade:
+        print(f"🚫 Trading disabled: {reason}")
+        return False
 
     print(f"📤 Sending {action} trade request...")
 
@@ -160,15 +285,40 @@ def execute_trade(symbol, action):
 
     price = tick.ask if action == "BUY" else tick.bid
 
-    # Calculate SL/TP (simple fixed pip values for now)
-    sl = price - 0.001 if action == "BUY" else price + 0.001
-    tp = price + 0.002 if action == "BUY" else price - 0.002
+    # Calculate SL/TP using Risk Manager
+    sl, tp = RISK_MANAGER.calculate_sl_tp(symbol, action, price)
+
+    # Calculate SL distance in pips for lot sizing
+    symbol_info = mt5.symbol_info(symbol)
+    if symbol_info is None:
+        print(f"❌ Could not get symbol info for {symbol}")
+        return False
+
+    point = symbol_info.point
+    sl_distance_pips = abs(price - sl) / (point * 10)  # Convert to pips
+
+    # Calculate optimal lot size (if dynamic sizing enabled)
+    if config.get("risk_management", {}).get("enable_dynamic_lot_sizing", False):
+        volume = RISK_MANAGER.calculate_lot_size(symbol, sl_distance_pips)
+        print(f"💰 Dynamic lot size: {volume} (Risk: {RISK_MANAGER.risk_percentage}%, SL: {sl_distance_pips:.1f} pips)")
+    else:
+        volume = VOLUME
+        print(f"💰 Fixed lot size: {volume}")
+
+    # Validate trade
+    is_valid, validation_reason = RISK_MANAGER.validate_trade(symbol, action, volume)
+    if not is_valid:
+        print(f"🚫 Trade validation failed: {validation_reason}")
+        return False
+
+    # Determine order type
+    order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
 
     # Build order request
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
         "symbol": symbol,
-        "volume": VOLUME,
+        "volume": volume,
         "type": order_type,
         "price": price,
         "sl": sl,
@@ -196,11 +346,14 @@ def execute_trade(symbol, action):
         print(f"   Price:  {result.price}")
         print(f"   SL:     {sl}")
         print(f"   TP:     {tp}")
-        log_trade(action, result, price, sl, tp)
+
+        # Get strategy name from manager
+        strategy_name = STRATEGY_MANAGER.method.upper()
+        log_trade(action, result, volume, price, sl, tp, strategy=strategy_name)
         return True
     else:
         print(f"\n❌ {action} failed! Code {result.retcode}: {result.comment}")
-        log_trade(f"{action}_FAILED", result, price, sl, tp)
+        log_trade(f"{action}_FAILED", result, volume, price, sl, tp, strategy="FAILED")
         return False
 
 
@@ -247,7 +400,23 @@ def close_position(position):
 
     if result.retcode == mt5.TRADE_RETCODE_DONE:
         profit = position.profit
+        commission = position.commission if hasattr(position, 'commission') else 0
+        swap = position.swap if hasattr(position, 'swap') else 0
+
         print(f"✅ Position #{position.ticket} closed | Profit: {profit:.2f}")
+
+        # Log trade close
+        TRADE_LOGGER.log_trade_close(
+            ticket=position.ticket,
+            exit_price=close_price,
+            profit=profit,
+            commission=commission,
+            swap=swap
+        )
+
+        # Update daily P/L tracking
+        RISK_MANAGER.update_daily_pnl(profit)
+
         return True
     else:
         print(f"❌ Failed to close position #{position.ticket} | Code: {result.retcode}")
@@ -265,8 +434,17 @@ def trading_iteration(symbol):
     print(f"🔄 Trading iteration at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}")
 
-    # Get strategy decision
-    action = trade_decision(symbol)
+    # Display daily P/L status
+    daily_pnl = RISK_MANAGER.get_daily_pnl()
+    can_trade, reason = RISK_MANAGER.can_trade()
+    print(f"📊 Daily P/L: ${daily_pnl:.2f} | Status: {reason}")
+
+    if not can_trade:
+        print(f"🚫 Trading halted: {reason}")
+        return
+
+    # Get combined strategy decision
+    action = STRATEGY_MANAGER.generate_combined_signal(symbol)
 
     if action not in ["BUY", "SELL"]:
         print("⚠️  No trade signal from strategy.")
@@ -364,7 +542,17 @@ def run_continuous_trading():
 
     finally:
         print(f"\n🔚 Shutting down after {iteration_count} iterations...")
-        print("   Closing MT5 connection...")
+
+        # Generate and display performance report
+        try:
+            print("\n" + "="*80)
+            print("📊 GENERATING PERFORMANCE REPORT...")
+            print("="*80)
+            ANALYTICS.print_summary_report(days=7)
+        except Exception as e:
+            print(f"⚠️  Could not generate performance report: {e}")
+
+        print("\n   Closing MT5 connection...")
         mt5.shutdown()
         print("✅ Shutdown complete.")
 

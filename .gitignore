@@ -71,9 +71,16 @@ junit/
 logs/*.log
 logs/*.txt
 logs/*.csv
+logs/*.json
 logs/**/*.log
 logs/**/*.txt
 logs/**/*.csv
+logs/**/*.json
+logs/reports/
+logs/daily_pnl.json
+logs/trades.log
+logs/trades.csv
+logs/trades.db
 
 # Configuration - sensitive data
 config/settings.local.json
