@@ -107,18 +107,31 @@ class TestPositionTracking:
 class TestTradeExecution:
     """Tests for trade execution with new structure."""
     
+    @patch('main.RISK_MANAGER')
     @patch('main.mt5')
     @patch('main.log_trade')
-    def test_execute_trade_buy_success(self, mock_log, mock_mt5):
+    def test_execute_trade_buy_success(self, mock_log, mock_mt5, mock_risk_mgr):
         """Test successful BUY trade execution."""
         from main import execute_trade
-        
+
+        # Mock risk manager
+        mock_risk_mgr.can_trade.return_value = (True, "OK")
+        mock_risk_mgr.calculate_sl_tp.return_value = (1.15945, 1.16245)
+        mock_risk_mgr.calculate_lot_size.return_value = 0.1
+        mock_risk_mgr.validate_trade.return_value = (True, "Valid")
+        mock_risk_mgr.risk_percentage = 1.0
+
+        # Mock symbol info
+        symbol_info = Mock()
+        symbol_info.point = 0.00001
+        mock_mt5.symbol_info.return_value = symbol_info
+
         # Mock tick data
         tick = Mock()
         tick.ask = 1.16045
         tick.bid = 1.16025
         mock_mt5.symbol_info_tick.return_value = tick
-        
+
         # Mock successful order
         result = Mock()
         result.retcode = 10009  # TRADE_RETCODE_DONE
@@ -130,24 +143,37 @@ class TestTradeExecution:
         mock_mt5.TRADE_ACTION_DEAL = 1
         mock_mt5.ORDER_TIME_GTC = 0
         mock_mt5.ORDER_FILLING_FOK = 1
-        
+
         success = execute_trade("EURUSD", "BUY")
-        
+
         assert success is True
         mock_log.assert_called_once()
     
+    @patch('main.RISK_MANAGER')
     @patch('main.mt5')
     @patch('main.log_trade')
-    def test_execute_trade_sell_success(self, mock_log, mock_mt5):
+    def test_execute_trade_sell_success(self, mock_log, mock_mt5, mock_risk_mgr):
         """Test successful SELL trade execution."""
         from main import execute_trade
-        
+
+        # Mock risk manager
+        mock_risk_mgr.can_trade.return_value = (True, "OK")
+        mock_risk_mgr.calculate_sl_tp.return_value = (1.16125, 1.15825)
+        mock_risk_mgr.calculate_lot_size.return_value = 0.1
+        mock_risk_mgr.validate_trade.return_value = (True, "Valid")
+        mock_risk_mgr.risk_percentage = 1.0
+
+        # Mock symbol info
+        symbol_info = Mock()
+        symbol_info.point = 0.00001
+        mock_mt5.symbol_info.return_value = symbol_info
+
         # Mock tick data
         tick = Mock()
         tick.ask = 1.16045
         tick.bid = 1.16025
         mock_mt5.symbol_info_tick.return_value = tick
-        
+
         # Mock successful order
         result = Mock()
         result.retcode = 10009
@@ -159,35 +185,52 @@ class TestTradeExecution:
         mock_mt5.TRADE_ACTION_DEAL = 1
         mock_mt5.ORDER_TIME_GTC = 0
         mock_mt5.ORDER_FILLING_FOK = 1
-        
+
         success = execute_trade("EURUSD", "SELL")
-        
+
         assert success is True
         mock_log.assert_called_once()
     
+    @patch('main.RISK_MANAGER')
     @patch('main.mt5')
-    def test_execute_trade_no_tick_data(self, mock_mt5):
+    def test_execute_trade_no_tick_data(self, mock_mt5, mock_risk_mgr):
         """Test trade execution fails when tick data unavailable."""
         from main import execute_trade
-        
+
+        # Mock risk manager
+        mock_risk_mgr.can_trade.return_value = (True, "OK")
+
         mock_mt5.symbol_info_tick.return_value = None
-        
+
         success = execute_trade("EURUSD", "BUY")
-        
+
         assert success is False
-    
+
+    @patch('main.RISK_MANAGER')
     @patch('main.mt5')
     @patch('main.log_trade')
-    def test_execute_trade_order_failed(self, mock_log, mock_mt5):
+    def test_execute_trade_order_failed(self, mock_log, mock_mt5, mock_risk_mgr):
         """Test trade execution when order fails."""
         from main import execute_trade
-        
+
+        # Mock risk manager
+        mock_risk_mgr.can_trade.return_value = (True, "OK")
+        mock_risk_mgr.calculate_sl_tp.return_value = (1.15945, 1.16245)
+        mock_risk_mgr.calculate_lot_size.return_value = 0.1
+        mock_risk_mgr.validate_trade.return_value = (True, "Valid")
+        mock_risk_mgr.risk_percentage = 1.0
+
+        # Mock symbol info
+        symbol_info = Mock()
+        symbol_info.point = 0.00001
+        mock_mt5.symbol_info.return_value = symbol_info
+
         # Mock tick data
         tick = Mock()
         tick.ask = 1.16045
         tick.bid = 1.16025
         mock_mt5.symbol_info_tick.return_value = tick
-        
+
         # Mock failed order
         result = Mock()
         result.retcode = 10013  # Invalid request
@@ -199,7 +242,7 @@ class TestTradeExecution:
         mock_mt5.TRADE_ACTION_DEAL = 1
         mock_mt5.ORDER_TIME_GTC = 0
         mock_mt5.ORDER_FILLING_FOK = 1
-        
+
         success = execute_trade("EURUSD", "BUY")
         
         assert success is False

@@ -15,6 +15,9 @@ from strategies import (
     StrategyManager
 )
 
+# Import risk management
+from risk_manager import RiskManager
+
 # ------------------------------
 # GLOBAL STATE
 # ------------------------------
@@ -127,6 +130,13 @@ def initialize_strategies():
 # Initialize strategy manager
 STRATEGY_MANAGER = initialize_strategies()
 
+# Initialize Risk Manager
+RISK_MANAGER = RiskManager(config)
+print(f"[Config] Risk Manager initialized")
+print(f"[Config] Risk per trade: {RISK_MANAGER.risk_percentage}%")
+print(f"[Config] SL/TP method: {RISK_MANAGER.sl_method}/{RISK_MANAGER.tp_method}")
+print(f"[Config] Daily limits: Loss=${RISK_MANAGER.daily_loss_limit}, Profit=${RISK_MANAGER.daily_profit_target}")
+
 # ------------------------------
 # HELPER FUNCTIONS
 # ------------------------------
@@ -217,7 +227,7 @@ def log_trade(action, result, price, sl, tp):
 
 def execute_trade(symbol, action):
     """
-    Execute a trade based on the action signal.
+    Execute a trade based on the action signal with risk management.
 
     Args:
         symbol: Trading symbol
@@ -226,8 +236,11 @@ def execute_trade(symbol, action):
     Returns:
         Boolean indicating success
     """
-    # Determine order type
-    order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
+    # Check if trading is allowed (daily limits)
+    can_trade, reason = RISK_MANAGER.can_trade()
+    if not can_trade:
+        print(f"🚫 Trading disabled: {reason}")
+        return False
 
     print(f"📤 Sending {action} trade request...")
 
@@ -239,15 +252,40 @@ def execute_trade(symbol, action):
 
     price = tick.ask if action == "BUY" else tick.bid
 
-    # Calculate SL/TP (simple fixed pip values for now)
-    sl = price - 0.001 if action == "BUY" else price + 0.001
-    tp = price + 0.002 if action == "BUY" else price - 0.002
+    # Calculate SL/TP using Risk Manager
+    sl, tp = RISK_MANAGER.calculate_sl_tp(symbol, action, price)
+
+    # Calculate SL distance in pips for lot sizing
+    symbol_info = mt5.symbol_info(symbol)
+    if symbol_info is None:
+        print(f"❌ Could not get symbol info for {symbol}")
+        return False
+
+    point = symbol_info.point
+    sl_distance_pips = abs(price - sl) / (point * 10)  # Convert to pips
+
+    # Calculate optimal lot size (if dynamic sizing enabled)
+    if config.get("risk_management", {}).get("enable_dynamic_lot_sizing", False):
+        volume = RISK_MANAGER.calculate_lot_size(symbol, sl_distance_pips)
+        print(f"💰 Dynamic lot size: {volume} (Risk: {RISK_MANAGER.risk_percentage}%, SL: {sl_distance_pips:.1f} pips)")
+    else:
+        volume = VOLUME
+        print(f"💰 Fixed lot size: {volume}")
+
+    # Validate trade
+    is_valid, validation_reason = RISK_MANAGER.validate_trade(symbol, action, volume)
+    if not is_valid:
+        print(f"🚫 Trade validation failed: {validation_reason}")
+        return False
+
+    # Determine order type
+    order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
 
     # Build order request
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
         "symbol": symbol,
-        "volume": VOLUME,
+        "volume": volume,
         "type": order_type,
         "price": price,
         "sl": sl,
@@ -327,6 +365,10 @@ def close_position(position):
     if result.retcode == mt5.TRADE_RETCODE_DONE:
         profit = position.profit
         print(f"✅ Position #{position.ticket} closed | Profit: {profit:.2f}")
+
+        # Update daily P/L tracking
+        RISK_MANAGER.update_daily_pnl(profit)
+
         return True
     else:
         print(f"❌ Failed to close position #{position.ticket} | Code: {result.retcode}")
@@ -343,6 +385,15 @@ def trading_iteration(symbol):
     print(f"\n{'='*60}")
     print(f"🔄 Trading iteration at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}")
+
+    # Display daily P/L status
+    daily_pnl = RISK_MANAGER.get_daily_pnl()
+    can_trade, reason = RISK_MANAGER.can_trade()
+    print(f"📊 Daily P/L: ${daily_pnl:.2f} | Status: {reason}")
+
+    if not can_trade:
+        print(f"🚫 Trading halted: {reason}")
+        return
 
     # Get combined strategy decision
     action = STRATEGY_MANAGER.generate_combined_signal(symbol)

@@ -56,31 +56,102 @@ Complete guide for using the TraderBot MetaTrader 5 automated trading system.
 
 ### Configuration File: `config/settings.json`
 
-```json
-{
-  "symbol": "EURUSD",
-  "volume": 0.1,
-  "deviation": 50,
-  "trade_interval_seconds": 300,
-  "max_concurrent_trades": 3,
-  "enable_continuous_trading": false
-}
-```
+The configuration file contains three main sections:
+1. **Basic Trading Settings**: Symbol, volume, deviation, intervals
+2. **Strategy Configuration**: Multiple strategies with weights and combination methods
+3. **Risk Management**: Dynamic lot sizing, SL/TP calculation, daily limits
 
-### Configuration Parameters
+### Basic Trading Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `symbol` | string | "EURUSD" | Trading symbol (e.g., EURUSD, GBPUSD, USDJPY) |
-| `volume` | float | 0.1 | Trade volume in lots |
+| `volume` | float | 0.1 | Trade volume in lots (used if dynamic sizing disabled) |
 | `deviation` | integer | 50 | Maximum price deviation in points |
-| `trade_interval_seconds` | integer | 300 | Time between trading checks (seconds) |
-| `max_concurrent_trades` | integer | 3 | Maximum number of open positions |
-| `enable_continuous_trading` | boolean | false | Enable continuous trading mode |
+| `trade_interval_seconds` | integer | 60 | Time between trading checks (seconds) |
+| `max_concurrent_trades` | integer | 10 | Maximum number of open positions |
+| `enable_continuous_trading` | boolean | true | Enable continuous trading mode |
+
+### Risk Management Parameters
+
+The bot includes comprehensive risk management features:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `risk_percentage` | float | 1.0 | Percentage of account balance to risk per trade |
+| `max_risk_percentage` | float | 5.0 | Maximum allowed risk percentage |
+| `min_lot_size` | float | 0.01 | Minimum lot size for trades |
+| `max_lot_size` | float | 1.0 | Maximum lot size for trades |
+| `sl_method` | string | "atr" | Stop-loss calculation method: "atr", "fixed_pips", "percentage" |
+| `tp_method` | string | "atr" | Take-profit calculation method: "atr", "fixed_pips", "percentage" |
+| `fixed_sl_pips` | integer | 100 | Fixed SL distance in pips (if sl_method="fixed_pips") |
+| `fixed_tp_pips` | integer | 200 | Fixed TP distance in pips (if tp_method="fixed_pips") |
+| `atr_period` | integer | 14 | ATR calculation period |
+| `atr_sl_multiplier` | float | 2.0 | ATR multiplier for stop-loss |
+| `atr_tp_multiplier` | float | 3.0 | ATR multiplier for take-profit |
+| `sl_percentage` | float | 0.5 | SL as percentage of entry price (if sl_method="percentage") |
+| `tp_percentage` | float | 1.0 | TP as percentage of entry price (if tp_method="percentage") |
+| `daily_loss_limit` | float | 500.0 | Maximum daily loss before trading stops ($) |
+| `daily_profit_target` | float | 1000.0 | Daily profit target before trading stops ($) |
+| `enable_daily_limits` | boolean | true | Enable/disable daily limits |
+| `enable_dynamic_lot_sizing` | boolean | true | Enable dynamic lot size calculation |
+
+#### Risk Management Methods
+
+**1. ATR-Based (Recommended)**
+- Uses Average True Range to adapt to market volatility
+- SL = Entry ± (ATR × atr_sl_multiplier)
+- TP = Entry ± (ATR × atr_tp_multiplier)
+- Example: ATR=0.0034, SL multiplier=2.0 → SL distance = 34 pips
+
+**2. Fixed Pips**
+- Uses fixed pip distances regardless of volatility
+- SL = Entry ± (fixed_sl_pips × point × 10)
+- TP = Entry ± (fixed_tp_pips × point × 10)
+- Example: fixed_sl_pips=100 → SL distance = 100 pips
+
+**3. Percentage**
+- Uses percentage of entry price
+- SL = Entry × (1 ± sl_percentage/100)
+- TP = Entry × (1 ± tp_percentage/100)
+- Example: Entry=1.16000, sl_percentage=0.5 → SL = 1.15420
+
+#### Dynamic Lot Sizing
+
+When `enable_dynamic_lot_sizing` is true, the bot calculates optimal lot size:
+
+```
+lot_size = risk_amount / (sl_pips × pip_value_per_lot)
+
+where:
+  risk_amount = account_balance × (risk_percentage / 100)
+  pip_value_per_lot = point_value × contract_size
+```
+
+Example:
+- Account balance: $10,000
+- Risk percentage: 1% → Risk amount: $100
+- SL distance: 34 pips
+- Pip value: $1 per pip per lot
+- **Calculated lot size: 100 / (34 × 1) = 2.94 lots** (capped at max_lot_size)
+
+#### Daily Limits
+
+The bot tracks daily profit/loss and stops trading when limits are reached:
+- **Loss Limit**: Stops trading if daily loss reaches `daily_loss_limit`
+- **Profit Target**: Stops trading if daily profit reaches `daily_profit_target`
+- **P/L Tracking**: Stored in `logs/daily_pnl.json`
+- **Reset**: Automatically resets at midnight
 
 ### Recommended Settings
 
 #### Conservative (Demo/Learning)
+- **Risk**: 0.5% per trade
+- **Daily Limits**: $100 loss, $200 profit
+- **SL/TP**: Fixed pips (100/200)
+- **Lot Size**: Fixed 0.01 lots
+- **Interval**: 10 minutes
+
 ```json
 {
   "symbol": "EURUSD",
@@ -88,33 +159,88 @@ Complete guide for using the TraderBot MetaTrader 5 automated trading system.
   "deviation": 50,
   "trade_interval_seconds": 600,
   "max_concurrent_trades": 1,
-  "enable_continuous_trading": false
+  "enable_continuous_trading": false,
+  "risk_management": {
+    "risk_percentage": 0.5,
+    "min_lot_size": 0.01,
+    "max_lot_size": 0.1,
+    "sl_method": "fixed_pips",
+    "tp_method": "fixed_pips",
+    "fixed_sl_pips": 100,
+    "fixed_tp_pips": 200,
+    "daily_loss_limit": 100.0,
+    "daily_profit_target": 200.0,
+    "enable_daily_limits": true,
+    "enable_dynamic_lot_sizing": false
+  }
 }
 ```
 
 #### Moderate (Experienced Traders)
+- **Risk**: 1% per trade
+- **Daily Limits**: $500 loss, $1000 profit
+- **SL/TP**: ATR-based (2x/3x)
+- **Lot Size**: Dynamic (0.01-1.0)
+- **Interval**: 1 minute
+
 ```json
 {
   "symbol": "EURUSD",
   "volume": 0.1,
   "deviation": 50,
-  "trade_interval_seconds": 300,
+  "trade_interval_seconds": 60,
   "max_concurrent_trades": 3,
-  "enable_continuous_trading": true
+  "enable_continuous_trading": true,
+  "risk_management": {
+    "risk_percentage": 1.0,
+    "min_lot_size": 0.01,
+    "max_lot_size": 1.0,
+    "sl_method": "atr",
+    "tp_method": "atr",
+    "atr_period": 14,
+    "atr_sl_multiplier": 2.0,
+    "atr_tp_multiplier": 3.0,
+    "daily_loss_limit": 500.0,
+    "daily_profit_target": 1000.0,
+    "enable_daily_limits": true,
+    "enable_dynamic_lot_sizing": true
+  }
 }
 ```
 
-#### Aggressive (Advanced Only)
+#### Aggressive (Advanced Only - Use with Caution)
+- **Risk**: 2% per trade
+- **Daily Limits**: $1000 loss, $2000 profit
+- **SL/TP**: ATR-based (1.5x/2.5x) - Tighter stops
+- **Lot Size**: Dynamic (0.01-5.0)
+- **Interval**: 30 seconds
+
 ```json
 {
   "symbol": "EURUSD",
   "volume": 0.5,
   "deviation": 100,
-  "trade_interval_seconds": 60,
+  "trade_interval_seconds": 30,
   "max_concurrent_trades": 5,
-  "enable_continuous_trading": true
+  "enable_continuous_trading": true,
+  "risk_management": {
+    "risk_percentage": 2.0,
+    "min_lot_size": 0.01,
+    "max_lot_size": 5.0,
+    "sl_method": "atr",
+    "tp_method": "atr",
+    "atr_period": 14,
+    "atr_sl_multiplier": 1.5,
+    "atr_tp_multiplier": 2.5,
+    "daily_loss_limit": 1000.0,
+    "daily_profit_target": 2000.0,
+    "enable_daily_limits": true,
+    "enable_dynamic_lot_sizing": true
+  }
 }
 ```
+
+⚠️ **Warning**: Aggressive settings can lead to significant losses. Only use with proper risk management and on demo accounts first.
 
 ## Trading Strategies
 

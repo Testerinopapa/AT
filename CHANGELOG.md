@@ -4,7 +4,66 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Milestone 3 - Multiple Strategies ✅ COMPLETED (2025-10-29)
+---
+
+## [0.5.0] - 2025-10-29
+
+### Milestone 5: Risk Management ✅ COMPLETED
+
+This release implements comprehensive risk management features to protect capital and optimize position sizing.
+
+#### Added
+
+**Risk Management Module (`risk_manager.py`)**
+- **Dynamic Lot Sizing**: Automatically calculates optimal position size based on account balance, risk percentage, SL distance, and symbol specifications
+- **Automatic SL/TP Calculation**: Three methods available (ATR, fixed pips, percentage)
+- **ATR Calculation**: Volatility-based indicator with caching for performance
+- **Daily Loss/Profit Limits**: Auto-disable trading when limits reached (default: $500 loss, $1000 profit)
+- **P/L Tracking**: Persistent daily tracking in `logs/daily_pnl.json`
+- **Trade Validation**: Validates lot size, daily limits, and symbol constraints
+
+**Configuration Enhancements**
+- Added `risk_management` section with 26 new parameters
+- Risk percentages, lot size limits, SL/TP methods, ATR config, daily limits
+
+**Main Bot Integration**
+- Check daily limits before each trading iteration
+- Calculate dynamic lot sizes and SL/TP for each trade
+- Update daily P/L after closing positions
+- Display daily P/L status in each iteration
+
+**Testing**
+- Created `tests/test_risk_management.py` with 22 comprehensive tests
+- Updated `tests/test_milestone2.py` to properly mock RiskManager
+- All 74 tests passing
+
+#### Changed
+- `main.py`: Integrated RiskManager into execute_trade(), close_position(), and trading_iteration()
+- `config/settings.json`: Expanded from 55 to 81 lines with risk management config
+
+#### Technical Details
+- Dynamic lot sizing: `lot_size = risk_amount / (sl_pips × pip_value_per_lot)`
+- ATR: `True Range = max(H-L, |H-PrevC|, |L-PrevC|)`, `ATR = avg(TR over N periods)`
+- Three SL/TP methods: ATR-based, fixed pips, percentage
+
+#### Live Testing Results
+✅ Successfully tested with live MT5 connection:
+- Dynamic lot sizing: 1.0 lot for 34 pip SL ✓
+- ATR-based SL/TP working ✓
+- Daily P/L tracking: $1.90 profit tracked ✓
+- Daily limits check working ✓
+- Position closed and P/L updated ✓
+
+#### Files
+- Modified: `main.py` (+50 lines), `config/settings.json` (+26 lines), `tests/test_milestone2.py`
+- Created: `risk_manager.py` (300 lines), `tests/test_risk_management.py` (22 tests), `logs/daily_pnl.json`
+- Statistics: 74 passing tests, +350 lines of code
+
+---
+
+## [0.4.0] - 2025-10-29
+
+### Milestone 3 - Multiple Strategies ✅ COMPLETED
 
 #### Added
 - **Strategy System Architecture**
