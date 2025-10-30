@@ -42,7 +42,7 @@
     },
 
     "MACDStrategy": {
-      "enabled": false,
+      "enabled": true,
       "weight": 1.0,
       "params": {
         "timeframe": "M15",
