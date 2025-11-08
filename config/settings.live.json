@@ -1,0 +1,92 @@
+﻿{
+    "symbol":  "EURUSD",
+    "volume":  0.1,
+    "deviation":  50,
+    "trade_interval_seconds":  60,
+    "max_concurrent_trades":  10,
+    "enable_continuous_trading":  true,
+    "strategy_config":  {
+                            "combination_method":  "majority",
+                            "enabled_strategies":  [
+                                                       "SimpleStrategy",
+                                                       "MAStrategy",
+                                                       "RSIStrategy"
+                                                   ],
+                            "SimpleStrategy":  {
+                                                   "enabled":  true,
+                                                   "weight":  1.0,
+                                                   "params":  {
+                                                                  "timeframe":  "M1",
+                                                                  "lookback":  20
+                                                              }
+                                               },
+                            "MAStrategy":  {
+                                               "enabled":  true,
+                                               "weight":  1.5,
+                                               "params":  {
+                                                              "timeframe":  "M5",
+                                                              "fast_period":  10,
+                                                              "slow_period":  20,
+                                                              "ma_type":  "EMA"
+                                                          }
+                                           },
+                            "RSIStrategy":  {
+                                                "enabled":  true,
+                                                "weight":  1.2,
+                                                "params":  {
+                                                               "timeframe":  "M5",
+                                                               "period":  14,
+                                                               "oversold":  30,
+                                                               "overbought":  70
+                                                           }
+                                            },
+                            "MACDStrategy":  {
+                                                 "enabled":  true,
+                                                 "weight":  1.0,
+                                                 "params":  {
+                                                                "timeframe":  "M15",
+                                                                "fast_period":  12,
+                                                                "slow_period":  26,
+                                                                "signal_period":  9
+                                                            }
+                                             }
+                        },
+    "risk_management":  {
+                            "risk_percentage":  1.0,
+                            "max_risk_percentage":  5.0,
+                            "min_lot_size":  0.01,
+                            "max_lot_size":  1.0,
+                            "sl_method":  "atr",
+                            "tp_method":  "atr",
+                            "fixed_sl_pips":  100,
+                            "fixed_tp_pips":  200,
+                            "atr_period":  14,
+                            "atr_sl_multiplier":  2.0,
+                            "atr_tp_multiplier":  3.0,
+                            "sl_percentage":  0.5,
+                            "tp_percentage":  1.0,
+                            "daily_loss_limit":  500.0,
+                            "daily_profit_target":  1000.0,
+                            "enable_daily_limits":  true,
+                            "enable_dynamic_lot_sizing":  true
+                        },
+    "market_data":  {
+                        "mode":  "live",
+                        "snapshot_path":  "data/env_data.pkl",
+                        "backtest":  {
+                                         "timeframe":  "H1",
+                                         "history":  {
+                                                         "start":  "2023-01-01T00:00:00",
+                                                         "end":  "2023-12-31T23:59:59",
+                                                         "timezone":  "UTC",
+                                                         "align_to_broker_timezone":  false
+                                                     },
+                                         "initial_cash":  100000.0,
+                                         "commission":  {
+                                                            "model":  "percentage",
+                                                            "rate":  0.0002,
+                                                            "per_trade":  0.0
+                                                        }
+                                     }
+                    }
+}

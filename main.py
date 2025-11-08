@@ -1,4 +1,4 @@
-import MetaTrader5 as mt5
+﻿import MetaTrader5 as mt5
 import sys
 import json
 import os
@@ -57,14 +57,14 @@ def _resolve_timezone(name: str):
 
     if ZoneInfo is None:
         print(
-            f"⚠️  zoneinfo module not available; unable to localize timezone '{name}'."
+            f"WARNING:  zoneinfo module not available; unable to localize timezone '{name}'."
         )
         return None
 
     try:
         return ZoneInfo(name)
     except ZoneInfoNotFoundError:
-        print(f"⚠️  Unknown timezone '{name}'. Falling back to naive datetimes.")
+        print(f"WARNING:  Unknown timezone '{name}'. Falling back to naive datetimes.")
         return None
 
 
@@ -78,14 +78,14 @@ def _parse_datetime(candidate, tzinfo):
         try:
             return datetime.fromtimestamp(candidate, tz=tzinfo)
         except (OverflowError, OSError, ValueError):
-            print(f"⚠️  Invalid timestamp '{candidate}' in backtest history config.")
+            print(f"WARNING:  Invalid timestamp '{candidate}' in backtest history config.")
             return None
 
     if isinstance(candidate, str):
         try:
             parsed = datetime.fromisoformat(candidate)
         except ValueError:
-            print(f"⚠️  Unable to parse datetime string '{candidate}'.")
+            print(f"WARNING:  Unable to parse datetime string '{candidate}'.")
             return None
 
         if parsed.tzinfo is None and tzinfo is not None:
@@ -93,7 +93,7 @@ def _parse_datetime(candidate, tzinfo):
 
         return parsed
 
-    print(f"⚠️  Unsupported datetime value '{candidate}' ({type(candidate).__name__}).")
+    print(f"WARNING:  Unsupported datetime value '{candidate}' ({type(candidate).__name__}).")
     return None
 
 
@@ -129,7 +129,7 @@ def parse_backtest_config(raw_config):
     timeframe_key = str(raw_config.get("timeframe", normalized["timeframe_key"])).upper()
     if timeframe_key not in MT5_TIMEFRAME_MAP:
         print(
-            f"⚠️  Unsupported backtest timeframe '{timeframe_key}'. Defaulting to {normalized['timeframe_key']}."
+            f"WARNING:  Unsupported backtest timeframe '{timeframe_key}'. Defaulting to {normalized['timeframe_key']}."
         )
         timeframe_key = normalized["timeframe_key"]
 
@@ -165,7 +165,7 @@ def parse_backtest_config(raw_config):
         )
     except (TypeError, ValueError):
         print(
-            f"⚠️  Invalid initial_cash '{raw_config.get('initial_cash')}'. Using default {normalized['initial_cash']}."
+            f"WARNING:  Invalid initial_cash '{raw_config.get('initial_cash')}'. Using default {normalized['initial_cash']}."
         )
 
     commission_raw = raw_config.get("commission", {})
@@ -178,7 +178,7 @@ def parse_backtest_config(raw_config):
                 commission_cfg["rate"] = float(commission_raw["rate"])
             except (TypeError, ValueError):
                 print(
-                    f"⚠️  Invalid commission rate '{commission_raw.get('rate')}'. Using default {commission_cfg['rate']}."
+                    f"WARNING:  Invalid commission rate '{commission_raw.get('rate')}'. Using default {commission_cfg['rate']}."
                 )
         if "per_trade" in commission_raw:
             try:
@@ -186,7 +186,7 @@ def parse_backtest_config(raw_config):
             except (TypeError, ValueError):
                 fallback_value = commission_cfg.get("per_trade")
                 print(
-                    "⚠️  Invalid commission per_trade "
+                    "WARNING:  Invalid commission per_trade "
                     f"'{commission_raw.get('per_trade')}'. Using default {fallback_value}."
                 )
 
@@ -213,7 +213,7 @@ running = True  # Flag for graceful shutdown
 def signal_handler(sig, frame):
     """Handle CTRL+C for graceful shutdown."""
     global running
-    print("\n\n⚠️  Shutdown signal received. Closing positions and exiting gracefully...")
+    print("\n\nWARNING:  Shutdown signal received. Closing positions and exiting gracefully...")
     running = False
 
 
@@ -224,26 +224,37 @@ signal.signal(signal.SIGTERM, signal_handler)
 # ------------------------------
 # CONFIGURATION
 # ------------------------------
-CONFIG_PATH = os.path.join("config", "settings.json")
+LIVE_CONFIG_CANDIDATES = [
+    os.path.join("config", "settings.live.json"),
+    os.path.join("config", "settings.json"),
+]
 LOG_PATH = os.path.join("logs", "trades.log")
 
-# Load config
-try:
-    with open(CONFIG_PATH, "r") as f:
-        config = json.load(f)
-except FileNotFoundError:
-    print("❌ settings.json not found. Please create config/settings.json")
+# Load live config (prefer settings.live.json)
+config = None
+CONFIG_PATH = None
+for _path in LIVE_CONFIG_CANDIDATES:
+    try:
+        with open(_path, "r", encoding="utf-8-sig") as f:
+            config = json.load(f)
+            CONFIG_PATH = _path
+            break
+    except FileNotFoundError:
+        continue
+if config is None:
+    print("ERROR: No live config found. Create config/settings.live.json or config/settings.json")
     sys.exit(1)
 
 MARKET_DATA_CONFIG = config.get("market_data", {}) if isinstance(config, dict) else {}
 ALLOWED_MARKET_MODES = {"live", "snapshot", "backtest"}
 MARKET_MODE = str(MARKET_DATA_CONFIG.get("mode", "live")).strip().lower()
 if MARKET_MODE not in ALLOWED_MARKET_MODES:
-    print(f"⚠️  Unknown market_data.mode '{MARKET_MODE}' - defaulting to live mode.")
+    print(f"WARNING:  Unknown market_data.mode '{MARKET_MODE}' - defaulting to live mode.")
     MARKET_MODE = "live"
 
 SNAPSHOT_PATH = MARKET_DATA_CONFIG.get("snapshot_path", "data/env_data.pkl")
-BACKTEST_CONFIG = parse_backtest_config(MARKET_DATA_CONFIG.get("backtest"))
+# Decoupled: main.py does not load or use backtest config
+BACKTEST_CONFIG = {}
 
 SYMBOL = config.get("symbol", "EURUSD")
 VOLUME = float(config.get("volume", 0.1))
@@ -328,29 +339,8 @@ print(f"[Config] Market data mode: {MARKET_MODE}")
 if MARKET_MODE == "snapshot":
     print(f"[Config] Snapshot path: {SNAPSHOT_PATH}")
 elif MARKET_MODE == "backtest":
-    history_section = BACKTEST_CONFIG.get("history", {})
-    print(
-        f"[Config] Backtest timeframe: {BACKTEST_CONFIG.get('timeframe_key')}"
-    )
-    print(
-        "[Config] Backtest history window: "
-        f"{_format_history_bound(history_section, 'start')}"
-        f" -> {_format_history_bound(history_section, 'end')}"
-    )
-    timezone_label = history_section.get("timezone_name", "UTC")
-    if history_section.get("timezone") is None and timezone_label:
-        timezone_label += " (unresolved)"
-    print(f"[Config] Backtest timezone: {timezone_label}")
-    align_flag = history_section.get("align_to_broker_timezone", False)
-    print(f"[Config] Align to broker timezone: {align_flag}")
-    print(
-        f"[Config] Backtest initial cash: {BACKTEST_CONFIG.get('initial_cash'):.2f}"
-    )
-    commission_cfg = BACKTEST_CONFIG.get("commission", {})
-    print(
-        "[Config] Commission model: "
-        f"{commission_cfg.get('model')} (rate={commission_cfg.get('rate')}, per_trade={commission_cfg.get('per_trade')})"
-    )
+    print("[Config] Backtest mode selected, but main.py does not run backtests.")
+    print("[Config] Use CLI: python scripts/run_backtest.py --symbol EURUSD --period 7 --interval 1h")
 
 # Initialize Trade Logger and Analytics
 TRADE_LOGGER = TradeLogger()
@@ -362,33 +352,33 @@ print(f"[Config] Trade Logger and Analytics initialized")
 # ------------------------------
 def initialize_mt5():
     """Initialize MT5 connection and validate account."""
-    print("🔌 Initializing MetaTrader 5...")
+    print("Initializing MetaTrader 5...")
 
     if not mt5.initialize():
-        print("❌ MT5 initialization failed:", mt5.last_error())
+        print("MT5 initialization failed:", mt5.last_error())
         return False
 
     account_info = mt5.account_info()
     if account_info is None:
-        print("❌ Could not retrieve account info. Is MetaTrader 5 logged in?")
+        print("ERROR: Could not retrieve account info. Is MetaTrader 5 logged in?")
         return False
 
-    print(f"✅ Connected to account #{account_info.login} | Balance: {account_info.balance:.2f}\n")
+    print(f"Connected to account #{account_info.login} | Balance: {account_info.balance:.2f}\n")
     return True
 
 
 def prepare_symbol(symbol):
     """Prepare and validate trading symbol."""
     if not mt5.symbol_select(symbol, True):
-        print(f"❌ Could not select symbol {symbol}")
+        print(f"ERROR: Could not select symbol {symbol}")
         return False
 
     symbol_info = mt5.symbol_info(symbol)
     if not symbol_info:
-        print(f"❌ Symbol {symbol} not found.")
+        print(f"ERROR: Symbol {symbol} not found.")
         return False
 
-    print(f"✅ Symbol {symbol} ready for trading.\n")
+    print(f"OK: Symbol {symbol} ready for trading.\n")
     return True
 
 
@@ -483,7 +473,7 @@ def execute_trade(symbol, action):
     # Check if trading is allowed (daily limits)
     can_trade, reason = RISK_MANAGER.can_trade()
     if not can_trade:
-        print(f"🚫 Trading disabled: {reason}")
+        print(f"BLOCKED: Trading disabled: {reason}")
         return False
 
     print(f"📤 Sending {action} trade request...")
@@ -491,7 +481,7 @@ def execute_trade(symbol, action):
     # Get latest prices
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
-        print(f"❌ Could not get tick data for {symbol}")
+        print(f"ERROR: Could not get tick data for {symbol}")
         return False
 
     price = tick.ask if action == "BUY" else tick.bid
@@ -502,7 +492,7 @@ def execute_trade(symbol, action):
     # Calculate SL distance in pips for lot sizing
     symbol_info = mt5.symbol_info(symbol)
     if symbol_info is None:
-        print(f"❌ Could not get symbol info for {symbol}")
+        print(f"ERROR: Could not get symbol info for {symbol}")
         return False
 
     point = symbol_info.point
@@ -519,7 +509,7 @@ def execute_trade(symbol, action):
     # Validate trade
     is_valid, validation_reason = RISK_MANAGER.validate_trade(symbol, action, volume)
     if not is_valid:
-        print(f"🚫 Trade validation failed: {validation_reason}")
+        print(f"BLOCKED: Trade validation failed: {validation_reason}")
         return False
 
     order_request = OrderRequest(
@@ -538,18 +528,18 @@ def execute_trade(symbol, action):
     try:
         result = send_market_order(order_request)
     except RuntimeError as exc:
-        print(f"❌ Order send failed: {exc}")
+        print(f"ERROR: Order send failed: {exc}")
         return False
 
     if result is None:
-        print("❌ Order send failed - no result returned")
+        print("ERROR: Order send failed - no result returned")
         return False
 
     print(f"\nTrade Result: {result}")
 
     # Log and report result
     if result.retcode == mt5.TRADE_RETCODE_DONE:
-        print(f"\n✅ {action} executed successfully!")
+        print(f"\nOK: {action} executed successfully!")
         print(f"   Ticket: {result.order}")
         print(f"   Price:  {result.price}")
         print(f"   SL:     {sl}")
@@ -560,7 +550,7 @@ def execute_trade(symbol, action):
         log_trade(action, result, volume, price, sl, tp, strategy=strategy_name)
         return True
     else:
-        print(f"\n❌ {action} failed! Code {result.retcode}: {result.comment}")
+        print(f"\nERROR: {action} failed! Code {result.retcode}: {result.comment}")
         log_trade(f"{action}_FAILED", result, volume, price, sl, tp, strategy="FAILED")
         return False
 
@@ -586,7 +576,7 @@ def close_position(position):
             comment="python script close",
         )
     except RuntimeError as exc:
-        print(f"❌ Failed to close position #{position.ticket}: {exc}")
+        print(f"ERROR: Failed to close position #{position.ticket}: {exc}")
         return False
 
     if result.retcode == mt5.TRADE_RETCODE_DONE:
@@ -595,7 +585,7 @@ def close_position(position):
         swap = position.swap if hasattr(position, 'swap') else 0
         close_price = result.price if hasattr(result, "price") else None
 
-        print(f"✅ Position #{position.ticket} closed | Profit: {profit:.2f}")
+        print(f"OK: Position #{position.ticket} closed | Profit: {profit:.2f}")
 
         # Log trade close
         TRADE_LOGGER.log_trade_close(
@@ -611,7 +601,7 @@ def close_position(position):
 
         return True
     else:
-        print(f"❌ Failed to close position #{position.ticket} | Code: {result.retcode}")
+        print(f"ERROR: Failed to close position #{position.ticket} | Code: {result.retcode}")
         return False
 
 
@@ -623,7 +613,7 @@ def trading_iteration(symbol):
         symbol: Trading symbol
     """
     print(f"\n{'='*60}")
-    print(f"🔄 Trading iteration at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f" Trading iteration at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}")
 
     # Display daily P/L status
@@ -632,14 +622,14 @@ def trading_iteration(symbol):
     print(f"📊 Daily P/L: ${daily_pnl:.2f} | Status: {reason}")
 
     if not can_trade:
-        print(f"🚫 Trading halted: {reason}")
+        print(f"BLOCKED: Trading halted: {reason}")
         return
 
     # Get combined strategy decision
     action = STRATEGY_MANAGER.generate_combined_signal(symbol)
 
     if action not in ["BUY", "SELL"]:
-        print("⚠️  No trade signal from strategy.")
+        print("WARNING: No trade signal from strategy.")
         return
 
     # Check existing positions on this symbol
@@ -652,7 +642,7 @@ def trading_iteration(symbol):
 
             # If signal is opposite to position, close the position
             if (action == "BUY" and pos_type == "SELL") or (action == "SELL" and pos_type == "BUY"):
-                print(f"🔄 Signal changed from {pos_type} to {action}. Closing position #{pos.ticket}...")
+                print(f" Signal changed from {pos_type} to {action}. Closing position #{pos.ticket}...")
                 close_position(pos)
             elif pos_type == action:
                 print(f"ℹ️  Already have a {pos_type} position on {symbol}. Signal agrees.")
@@ -660,13 +650,13 @@ def trading_iteration(symbol):
                 if can_open_new_trade():
                     print(f"💡 Adding another {action} position (pyramiding)...")
                 else:
-                    print(f"⚠️  Max concurrent trades reached. Skipping additional position.")
+                    print(f"WARNING: Max concurrent trades reached. Skipping additional position.")
                     return
 
     # Check if we can open new trade
     if not can_open_new_trade():
         open_count = len(get_open_positions())
-        print(f"⚠️  Max concurrent trades reached ({open_count}/{MAX_CONCURRENT_TRADES}). Skipping trade.")
+        print(f"WARNING: Max concurrent trades reached ({open_count}/{MAX_CONCURRENT_TRADES}). Skipping trade.")
         return
 
     # Execute the trade
@@ -684,7 +674,7 @@ def run_single_trade():
 
     trading_iteration(SYMBOL)
 
-    print("\n🔚 MT5 connection closed.")
+    print("\n MT5 connection closed.")
     mt5.shutdown()
 
 
@@ -699,7 +689,7 @@ def run_continuous_trading():
         mt5.shutdown()
         sys.exit(1)
 
-    print(f"\n🔁 Starting continuous trading mode...")
+    print(f"\nStarting continuous trading mode...")
     print(f"   Trade interval: {TRADE_INTERVAL} seconds")
     print(f"   Max concurrent trades: {MAX_CONCURRENT_TRADES}")
     print(f"   Press CTRL+C to stop gracefully\n")
@@ -730,10 +720,10 @@ def run_continuous_trading():
                 time.sleep(1)
 
     except Exception as e:
-        print(f"\n❌ Error in trading loop: {e}")
+        print(f"\nERROR: Error in trading loop: {e}")
 
     finally:
-        print(f"\n🔚 Shutting down after {iteration_count} iterations...")
+        print(f"\n Shutting down after {iteration_count} iterations...")
 
         # Generate and display performance report
         try:
@@ -742,11 +732,11 @@ def run_continuous_trading():
             print("="*80)
             ANALYTICS.print_summary_report(days=7)
         except Exception as e:
-            print(f"⚠️  Could not generate performance report: {e}")
+            print(f"WARNING: Could not generate performance report: {e}")
 
         print("\n   Closing MT5 connection...")
         mt5.shutdown()
-        print("✅ Shutdown complete.")
+        print("OK: Shutdown complete.")
 
 
 def load_environment_snapshots(path_str: str):
@@ -757,18 +747,18 @@ def load_environment_snapshots(path_str: str):
         candidate = Path.cwd() / candidate
 
     if not candidate.exists():
-        print(f"❌ Snapshot file not found: {candidate}")
+        print(f"ERROR: Snapshot file not found: {candidate}")
         sys.exit(1)
 
     try:
         with candidate.open("rb") as handle:
             snapshots = pickle.load(handle)
     except (OSError, pickle.UnpicklingError) as exc:
-        print(f"❌ Failed to load snapshot data from {candidate}: {exc}")
+        print(f"ERROR: Failed to load snapshot data from {candidate}: {exc}")
         sys.exit(1)
 
     if not isinstance(snapshots, dict):
-        print("❌ Snapshot payload must be a dictionary keyed by date.")
+        print("ERROR: Snapshot payload must be a dictionary keyed by date.")
         sys.exit(1)
 
     return snapshots, candidate
@@ -780,7 +770,7 @@ def run_backtest():
     history_section = BACKTEST_CONFIG.get("history", {})
 
     print("\n" + "=" * 80)
-    print("🧪 Backtest configuration preview")
+    print("Backtest configuration preview")
     print("=" * 80)
     print(f"Symbol: {SYMBOL}")
     print(f"Timeframe: {BACKTEST_CONFIG.get('timeframe_key')}")
@@ -800,7 +790,7 @@ def run_backtest():
         f"model={commission_cfg.get('model')}, rate={commission_cfg.get('rate')}, "
         f"per_trade={commission_cfg.get('per_trade')}"
     )
-    print("\n⚠️  Backtesting execution is not implemented yet. This is a configuration preview only.")
+    print("\nWARNING: Backtesting execution is not implemented yet. This is a configuration preview only.")
 
 
 def run_backtest_bt():
@@ -928,7 +918,7 @@ def run_backtest_bt():
     except Exception as exc:
         print(f"ERROR: Backtest execution failed: {exc}")
     print(
-        "\n⚠️  Backtesting execution is not implemented yet. "
+        "\nWARNING:  Backtesting execution is not implemented yet. "
         "This is a configuration preview only."
     )
 
@@ -943,7 +933,7 @@ def run_snapshot_replay():
     first_state = environment.reset()
 
     if first_state is None:
-        print(f"⚠️  Snapshot file {resolved_path} does not contain any entries.")
+        print(f"WARNING: Snapshot file {resolved_path} does not contain any entries.")
         return
 
     agent = EnvironmentAgent(
@@ -956,7 +946,7 @@ def run_snapshot_replay():
 
     total_snapshots = len(snapshots)
     print("\n" + "=" * 80)
-    print(f"🧪 Starting snapshot replay ({total_snapshots} snapshots from {resolved_path})")
+    print(f"Starting snapshot replay ({total_snapshots} snapshots from {resolved_path})")
     print("=" * 80)
 
     iteration = 0
@@ -1017,9 +1007,9 @@ def run_snapshot_replay():
         print(f"🛡️  Risk check: {reason}")
 
         if not can_trade:
-            print("🚫 Trade skipped due to risk limits.")
+            print("BLOCKED: Trade skipped due to risk limits.")
         elif decision in {"BUY", "SELL"}:
-            print(f"✅ Simulated {decision} action triggered in snapshot mode.")
+            print(f"OK: Simulated {decision} action triggered in snapshot mode.")
         else:
             print("ℹ️  No actionable trade signal for this snapshot.")
 
@@ -1027,7 +1017,7 @@ def run_snapshot_replay():
             print("\n📦 Reached end of snapshot dataset.")
             break
 
-    print(f"\n🔚 Snapshot replay completed after {iteration} steps.")
+    print(f"\n Snapshot replay completed after {iteration} steps.")
 
 
 # ------------------------------
@@ -1035,12 +1025,21 @@ def run_snapshot_replay():
 # ------------------------------
 if __name__ == "__main__":
     if MARKET_MODE == "snapshot":
+        # Snapshot replay is a lightweight way to test the live pipeline without MT5
         run_snapshot_replay()
     elif MARKET_MODE == "backtest":
-        run_backtest_bt()
+        # Defer backtesting to dedicated scripts so main.py stays focused on MT5 live trading
+        print("Backtesting is handled by CLI scripts. Try:")
+        print("  python scripts/run_backtest.py --symbol EURUSD --period 7 --interval 1h")
+        print("Or use your own CSV:  python scripts/run_backtest.py --source csv --csv <path>")
     elif ENABLE_CONTINUOUS:
+        # Live trading (continuous loop) via MetaTrader 5
         run_continuous_trading()
     else:
+        # Live single-shot trade via MetaTrader 5
         run_single_trade()
+
+
+
 
 

@@ -1,4 +1,4 @@
-"""
+﻿"""
 CLI: Run a Backtrader backtest using StrategyBridge (EnvironmentAgent bridge).
 
 Examples
@@ -210,6 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--decisions-path", default="logs/llm_decisions.jsonl", help="Path for decisions JSONL log")
     p.add_argument("--llm", choices=["none", "openrouter"], default="none", help="Enable LLM backend for decisions")
     p.add_argument("--llm-config", help="Optional JSON string with LLM config (backend specific)")
+    p.add_argument("--config-backtest", default="config/backtest.json", help="Optional backtest config JSON (symbol, timeframe, initial_cash, commission)")
     return p
 
 
@@ -229,4 +230,35 @@ def _build_agent_kwargs(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = build_parser()
     args = parser.parse_args()
+    # Load defaults from config/backtest.json if present and not overridden on CLI
+    try:
+        from pathlib import Path as _Path
+        import json as _json
+        cfg_path = _Path(args.config_backtest)
+        if cfg_path.exists():
+            with open(cfg_path, "r", encoding="utf-8-sig") as _fp:
+                _cfg = _json.load(_fp) or {}
+            # symbol
+            if args.symbol == parser.get_default("symbol") and _cfg.get("symbol"):
+                args.symbol = str(_cfg.get("symbol"))
+            # cash
+            if (
+                args.initial_cash == parser.get_default("initial_cash")
+                and _cfg.get("initial_cash") is not None
+            ):
+                args.initial_cash = float(_cfg.get("initial_cash"))
+            # commission
+            _com = _cfg.get("commission") or {}
+            if (
+                args.commission == parser.get_default("commission")
+                and _com.get("rate") is not None
+            ):
+                args.commission = float(_com.get("rate"))
+            # timeframe -> interval mapping (only if user left default)
+            _tf = str(_cfg.get("timeframe", "")).upper()
+            if args.interval == parser.get_default("interval") and _tf:
+                _map = {"M1": "1m", "M5": "5m", "M15": "15m", "M30": "30m", "H1": "1h", "H4": "1h", "D1": "1d"}
+                args.interval = _map.get(_tf, args.interval)
+    except Exception:
+        pass
     run(args)
