@@ -1,4 +1,12 @@
-"""CLI helper for building environment snapshot data."""
+"""CLI helper for building environment snapshot data.
+
+This script supports two execution modes:
+  1) Recommended: from repo root as a module
+       python -m scripts.build_env_data --symbol EURUSD --start 2024-01-01 --end 2024-01-31
+  2) Direct: python scripts/build_env_data.py ...
+     In direct mode we add the repository root to sys.path so the
+     top-level package imports (e.g., ``market_data``) resolve cleanly.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +16,13 @@ import pickle
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+# Allow running directly via `python scripts/build_env_data.py` by ensuring
+# the repository root is on sys.path. Using `python -m scripts.build_env_data`
+# from the repo root is still preferred.
+if __name__ == "__main__" and __package__ is None:
+    import sys
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from market_data import build_daily_snapshots
 
@@ -36,7 +51,17 @@ def main() -> None:
 
     start_dt, end_dt = _resolve_date_range(args.start, args.end, config)
 
-    snapshots = build_daily_snapshots(symbol, start_dt, end_dt)
+    # Initialize MetaTrader5 to ensure data retrieval works
+    import MetaTrader5 as mt5
+    if not mt5.initialize():
+        raise SystemExit(f"Failed to initialize MetaTrader5: {mt5.last_error()}")
+    try:
+        snapshots = build_daily_snapshots(symbol, start_dt, end_dt)
+    finally:
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
