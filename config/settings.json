@@ -80,8 +80,23 @@
   },
 
   "market_data": {
-    "mode": "live",
-    "snapshot_path": "data/env_data.pkl"
+    "mode": "backtest",
+    "snapshot_path": "data/env_data.pkl",
+    "backtest": {
+      "timeframe": "H1",
+      "history": {
+        "start": "2023-01-01T00:00:00",
+        "end": "2023-12-31T23:59:59",
+        "timezone": "UTC",
+        "align_to_broker_timezone": false
+      },
+      "initial_cash": 100000.0,
+      "commission": {
+        "model": "percentage",
+        "rate": 0.0002,
+        "per_trade": 0.0
+      }
+    }
   }
 }
 
