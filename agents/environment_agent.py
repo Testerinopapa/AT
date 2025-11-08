@@ -8,6 +8,7 @@ when no model is available.
 from __future__ import annotations
 
 from collections import Counter
+import json
 from numbers import Number
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -28,11 +29,15 @@ class EnvironmentAgent:
         can be queried (if it exposes helper methods) for realized P/L to feed
         back into the reflection memory.
     llm_executor:
-        Optional callable or object with a ``run(prompt: str)`` method. When
-        present, the agent will build prompts from its memory layers and use
-        the LLM output to decide trades. When ``None`` the agent falls back to
-        majority voting across strategies so live trading can continue without
-        an LLM backend.
+        Optional callable/object (or string identifier) with a ``run(prompt: str)``
+        method. When provided, the agent will build prompts from its memory
+        layers and use the LLM output to decide trades. When ``None`` the agent
+        falls back to majority voting across strategies so live trading can
+        continue without an LLM backend. A value of ``"openrouter"`` will create
+        a default :class:`~agents.llm_backends.OpenRouterLLMBackend` instance.
+    llm_config:
+        Optional dictionary of keyword arguments forwarded when instantiating
+        a built-in backend (such as ``"openrouter"``).
     memory_limits:
         Optional overrides for the maximum number of entries to keep per layer.
         Keys: ``"short"``, ``"mid"``, ``"long"``, ``"reflection"``.
@@ -56,6 +61,7 @@ class EnvironmentAgent:
         symbol: str,
         trade_logger: Optional[Any] = None,
         llm_executor: Optional[Any] = None,
+        llm_config: Optional[Dict[str, Any]] = None,
         memory_limits: Optional[Dict[str, int]] = None,
         feedback_gain: float = 0.05,
         feedback_cap: float = 5.0,
@@ -63,7 +69,7 @@ class EnvironmentAgent:
         self.strategy_manager = strategy_manager
         self.symbol = symbol
         self.trade_logger = trade_logger
-        self.llm_executor = llm_executor
+        self.llm_executor = self._initialise_llm_executor(llm_executor, llm_config)
         self.feedback_gain = feedback_gain
         self.feedback_cap = abs(feedback_cap)
 
@@ -336,7 +342,23 @@ class EnvironmentAgent:
 
         if isinstance(output, dict):
             decision = str(output.get("decision", "NONE")).upper()
-            rationale = str(output.get("rationale", output.get("reason", "")))
+            rationale = str(
+                output.get(
+                    "rationale",
+                    output.get("reason", output.get("content", "")),
+                )
+            )
+            content = output.get("content")
+            if content:
+                parsed = self._try_parse_json(content)
+                if isinstance(parsed, dict):
+                    decision = str(parsed.get("decision", decision)).upper()
+                    rationale = str(
+                        parsed.get(
+                            "rationale",
+                            parsed.get("reason", rationale),
+                        )
+                    )
         elif output is not None:
             text = str(output)
             upper_text = text.upper()
@@ -346,7 +368,17 @@ class EnvironmentAgent:
                 decision = "BUY"
             elif "NONE" in upper_text or "HOLD" in upper_text:
                 decision = "NONE"
-            rationale = text
+            parsed = self._try_parse_json(text)
+            if isinstance(parsed, dict):
+                decision = str(parsed.get("decision", decision)).upper()
+                rationale = str(
+                    parsed.get(
+                        "rationale",
+                        parsed.get("reason", parsed.get("content", text)),
+                    )
+                )
+            else:
+                rationale = text
 
         if decision not in {"BUY", "SELL", "NONE"}:
             decision = "NONE"
@@ -364,6 +396,22 @@ class EnvironmentAgent:
     # ------------------------------------------------------------------
     # Helpers: misc utilities
     # ------------------------------------------------------------------
+    def _initialise_llm_executor(
+        self, llm_executor: Optional[Any], llm_config: Optional[Dict[str, Any]]
+    ) -> Optional[Any]:
+        if llm_executor is None:
+            return None
+
+        if isinstance(llm_executor, str):
+            backend = llm_executor.lower().strip()
+            if backend in {"openrouter", "openrouter_chat"}:
+                from .llm_backends import OpenRouterLLMBackend
+
+                return OpenRouterLLMBackend(**(llm_config or {}))
+            raise ValueError(f"Unknown llm_executor identifier: {llm_executor}")
+
+        return llm_executor
+
     def _pull_trade_feedback(self) -> Optional[float]:
         if not self.trade_logger:
             return None
@@ -384,4 +432,11 @@ class EnvironmentAgent:
         if isinstance(value, (str, bytes)):
             return [value]
         return [str(v) for v in value if v is not None]
+
+    @staticmethod
+    def _try_parse_json(text: str) -> Optional[Any]:
+        try:
+            return json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            return None
 
