@@ -8,6 +8,15 @@ import pickle
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:  # pragma: no cover - Python < 3.9 fallback
+    ZoneInfo = None
+
+    class ZoneInfoNotFoundError(Exception):
+        """Fallback exception when zoneinfo is unavailable."""
+
+
 # Import new strategy system
 from strategies import (
     SimpleStrategy,
@@ -25,6 +34,173 @@ from trade_logger import TradeLogger
 from analytics import PerformanceAnalytics
 from agents import EnvironmentAgent
 from market_data.environment import MarketEnvironment
+
+
+MT5_TIMEFRAME_MAP = {
+    "M1": mt5.TIMEFRAME_M1,
+    "M5": mt5.TIMEFRAME_M5,
+    "M15": mt5.TIMEFRAME_M15,
+    "M30": mt5.TIMEFRAME_M30,
+    "H1": mt5.TIMEFRAME_H1,
+    "H4": mt5.TIMEFRAME_H4,
+    "D1": mt5.TIMEFRAME_D1,
+}
+
+
+def _resolve_timezone(name: str):
+    """Resolve a timezone name into a ZoneInfo object when available."""
+
+    if not name:
+        return None
+
+    if ZoneInfo is None:
+        print(
+            f"⚠️  zoneinfo module not available; unable to localize timezone '{name}'."
+        )
+        return None
+
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        print(f"⚠️  Unknown timezone '{name}'. Falling back to naive datetimes.")
+        return None
+
+
+def _parse_datetime(candidate, tzinfo):
+    """Parse ISO datetime strings or timestamps into datetime objects."""
+
+    if candidate in (None, ""):
+        return None
+
+    if isinstance(candidate, (int, float)):
+        try:
+            return datetime.fromtimestamp(candidate, tz=tzinfo)
+        except (OverflowError, OSError, ValueError):
+            print(f"⚠️  Invalid timestamp '{candidate}' in backtest history config.")
+            return None
+
+    if isinstance(candidate, str):
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            print(f"⚠️  Unable to parse datetime string '{candidate}'.")
+            return None
+
+        if parsed.tzinfo is None and tzinfo is not None:
+            parsed = parsed.replace(tzinfo=tzinfo)
+
+        return parsed
+
+    print(f"⚠️  Unsupported datetime value '{candidate}' ({type(candidate).__name__}).")
+    return None
+
+
+def parse_backtest_config(raw_config):
+    """Normalize backtest configuration and apply sensible defaults."""
+
+    default_timezone_name = "UTC"
+    default_timezone = _resolve_timezone(default_timezone_name)
+
+    normalized = {
+        "timeframe_key": "H1",
+        "timeframe": MT5_TIMEFRAME_MAP.get("H1", mt5.TIMEFRAME_H1),
+        "history": {
+            "start": None,
+            "start_raw": None,
+            "end": None,
+            "end_raw": None,
+            "timezone_name": default_timezone_name,
+            "timezone": default_timezone,
+            "align_to_broker_timezone": False,
+        },
+        "initial_cash": 100000.0,
+        "commission": {
+            "model": "percentage",
+            "rate": 0.0002,
+            "per_trade": 0.0,
+        },
+    }
+
+    if not isinstance(raw_config, dict):
+        return normalized
+
+    timeframe_key = str(raw_config.get("timeframe", normalized["timeframe_key"])).upper()
+    if timeframe_key not in MT5_TIMEFRAME_MAP:
+        print(
+            f"⚠️  Unsupported backtest timeframe '{timeframe_key}'. Defaulting to {normalized['timeframe_key']}."
+        )
+        timeframe_key = normalized["timeframe_key"]
+
+    normalized["timeframe_key"] = timeframe_key
+    normalized["timeframe"] = MT5_TIMEFRAME_MAP.get(timeframe_key, normalized["timeframe"])
+
+    history_raw = raw_config.get("history", {})
+    if not isinstance(history_raw, dict):
+        history_raw = {}
+
+    timezone_name = str(
+        history_raw.get("timezone", normalized["history"]["timezone_name"])
+    )
+    timezone_obj = _resolve_timezone(timezone_name)
+
+    history = normalized["history"]
+    history["timezone_name"] = timezone_name
+    history["timezone"] = timezone_obj
+    history["align_to_broker_timezone"] = bool(
+        history_raw.get(
+            "align_to_broker_timezone", history["align_to_broker_timezone"]
+        )
+    )
+
+    history["start_raw"] = history_raw.get("start")
+    history["end_raw"] = history_raw.get("end")
+    history["start"] = _parse_datetime(history["start_raw"], timezone_obj)
+    history["end"] = _parse_datetime(history["end_raw"], timezone_obj)
+
+    try:
+        normalized["initial_cash"] = float(
+            raw_config.get("initial_cash", normalized["initial_cash"])
+        )
+    except (TypeError, ValueError):
+        print(
+            f"⚠️  Invalid initial_cash '{raw_config.get('initial_cash')}'. Using default {normalized['initial_cash']}."
+        )
+
+    commission_raw = raw_config.get("commission", {})
+    commission_cfg = normalized["commission"]
+    if isinstance(commission_raw, dict):
+        if "model" in commission_raw:
+            commission_cfg["model"] = str(commission_raw["model"]).strip().lower()
+        if "rate" in commission_raw:
+            try:
+                commission_cfg["rate"] = float(commission_raw["rate"])
+            except (TypeError, ValueError):
+                print(
+                    f"⚠️  Invalid commission rate '{commission_raw.get('rate')}'. Using default {commission_cfg['rate']}."
+                )
+        if "per_trade" in commission_raw:
+            try:
+                commission_cfg["per_trade"] = float(commission_raw["per_trade"])
+            except (TypeError, ValueError):
+                fallback_value = commission_cfg.get("per_trade")
+                print(
+                    "⚠️  Invalid commission per_trade "
+                    f"'{commission_raw.get('per_trade')}'. Using default {fallback_value}."
+                )
+
+    return normalized
+
+
+def _format_history_bound(history_section, bound):
+    """Return a human-friendly representation of a history boundary."""
+
+    dt_obj = history_section.get(bound)
+    if dt_obj is not None:
+        return dt_obj.isoformat()
+
+    raw_value = history_section.get(f"{bound}_raw")
+    return raw_value if raw_value not in (None, "") else "not set"
+
 
 # ------------------------------
 # GLOBAL STATE
@@ -58,12 +234,14 @@ except FileNotFoundError:
     sys.exit(1)
 
 MARKET_DATA_CONFIG = config.get("market_data", {}) if isinstance(config, dict) else {}
+ALLOWED_MARKET_MODES = {"live", "snapshot", "backtest"}
 MARKET_MODE = str(MARKET_DATA_CONFIG.get("mode", "live")).strip().lower()
-if MARKET_MODE not in {"live", "snapshot"}:
+if MARKET_MODE not in ALLOWED_MARKET_MODES:
     print(f"⚠️  Unknown market_data.mode '{MARKET_MODE}' - defaulting to live mode.")
     MARKET_MODE = "live"
 
 SNAPSHOT_PATH = MARKET_DATA_CONFIG.get("snapshot_path", "data/env_data.pkl")
+BACKTEST_CONFIG = parse_backtest_config(MARKET_DATA_CONFIG.get("backtest"))
 
 SYMBOL = config.get("symbol", "EURUSD")
 VOLUME = float(config.get("volume", 0.1))
@@ -89,17 +267,6 @@ def initialize_strategies():
     strategy_config = config.get("strategy_config", {})
     combination_method = strategy_config.get("combination_method", "majority")
 
-    # Map timeframe strings to MT5 constants
-    timeframe_map = {
-        "M1": mt5.TIMEFRAME_M1,
-        "M5": mt5.TIMEFRAME_M5,
-        "M15": mt5.TIMEFRAME_M15,
-        "M30": mt5.TIMEFRAME_M30,
-        "H1": mt5.TIMEFRAME_H1,
-        "H4": mt5.TIMEFRAME_H4,
-        "D1": mt5.TIMEFRAME_D1
-    }
-
     # Create strategy manager
     manager = StrategyManager(method=combination_method)
 
@@ -121,7 +288,10 @@ def initialize_strategies():
         # Get parameters and convert timeframe strings
         params = strategy_settings.get("params", {}).copy()
         if "timeframe" in params and isinstance(params["timeframe"], str):
-            params["timeframe"] = timeframe_map.get(params["timeframe"], mt5.TIMEFRAME_M5)
+            timeframe_key = params["timeframe"].upper()
+            params["timeframe"] = MT5_TIMEFRAME_MAP.get(
+                timeframe_key, mt5.TIMEFRAME_M5
+            )
 
         # Create strategy instance
         strategy = strategy_class(params)
@@ -155,6 +325,30 @@ print(f"[Config] Daily limits: Loss=${RISK_MANAGER.daily_loss_limit}, Profit=${R
 print(f"[Config] Market data mode: {MARKET_MODE}")
 if MARKET_MODE == "snapshot":
     print(f"[Config] Snapshot path: {SNAPSHOT_PATH}")
+elif MARKET_MODE == "backtest":
+    history_section = BACKTEST_CONFIG.get("history", {})
+    print(
+        f"[Config] Backtest timeframe: {BACKTEST_CONFIG.get('timeframe_key')}"
+    )
+    print(
+        "[Config] Backtest history window: "
+        f"{_format_history_bound(history_section, 'start')}"
+        f" → {_format_history_bound(history_section, 'end')}"
+    )
+    timezone_label = history_section.get("timezone_name", "UTC")
+    if history_section.get("timezone") is None and timezone_label:
+        timezone_label += " (unresolved)"
+    print(f"[Config] Backtest timezone: {timezone_label}")
+    align_flag = history_section.get("align_to_broker_timezone", False)
+    print(f"[Config] Align to broker timezone: {align_flag}")
+    print(
+        f"[Config] Backtest initial cash: {BACKTEST_CONFIG.get('initial_cash'):.2f}"
+    )
+    commission_cfg = BACKTEST_CONFIG.get("commission", {})
+    print(
+        "[Config] Commission model: "
+        f"{commission_cfg.get('model')} (rate={commission_cfg.get('rate')}, per_trade={commission_cfg.get('per_trade')})"
+    )
 
 # Initialize Trade Logger and Analytics
 TRADE_LOGGER = TradeLogger()
@@ -597,6 +791,38 @@ def load_environment_snapshots(path_str: str):
     return snapshots, candidate
 
 
+def run_backtest():
+    """Placeholder runner for future backtesting workflows."""
+
+    history_section = BACKTEST_CONFIG.get("history", {})
+
+    print("\n" + "=" * 80)
+    print("🧪 Backtest configuration preview")
+    print("=" * 80)
+    print(f"Symbol: {SYMBOL}")
+    print(f"Timeframe: {BACKTEST_CONFIG.get('timeframe_key')}")
+    print(
+        f"History window: {_format_history_bound(history_section, 'start')}"
+        f" → {_format_history_bound(history_section, 'end')}"
+    )
+    print(
+        f"Timezone: {history_section.get('timezone_name')} | "
+        f"Align to broker: {history_section.get('align_to_broker_timezone')}"
+    )
+    print(f"Initial cash: {BACKTEST_CONFIG.get('initial_cash')}")
+
+    commission_cfg = BACKTEST_CONFIG.get("commission", {})
+    print(
+        "Commission: "
+        f"model={commission_cfg.get('model')}, rate={commission_cfg.get('rate')}, "
+        f"per_trade={commission_cfg.get('per_trade')}"
+    )
+    print(
+        "\n⚠️  Backtesting execution is not implemented yet. "
+        "This is a configuration preview only."
+    )
+
+
 def run_snapshot_replay():
     """Replay pre-collected market environment snapshots."""
 
@@ -700,6 +926,8 @@ def run_snapshot_replay():
 if __name__ == "__main__":
     if MARKET_MODE == "snapshot":
         run_snapshot_replay()
+    elif MARKET_MODE == "backtest":
+        run_backtest()
     elif ENABLE_CONTINUOUS:
         run_continuous_trading()
     else:
