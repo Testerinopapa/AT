@@ -98,16 +98,44 @@ def _coerce_to_date(value: datetime | date) -> date:
 
 
 def _load_price_data(symbol: str, start: date, end: date) -> Dict[date, Dict]:
-    """Fetch OHLC bars from MetaTrader5 and bucket them by calendar date."""
+    """Fetch OHLC bars from MetaTrader5 and bucket them by calendar date.
 
-    day_count = (end - start).days + 1
-    if day_count <= 0:
+    Attempts to fetch an exact date range; falls back to recent-count fetch.
+    """
+
+    if start > end:
         return {}
 
-    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, day_count)
     price_by_date: Dict[date, Dict] = {}
 
+    # Preferred: exact date range (inclusive of end day)
+    start_dt = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
+    end_dt_exclusive = datetime(end.year, end.month, end.day, tzinfo=timezone.utc) + timedelta(days=1)
+
+    rates = None
+    try:
+        rates = mt5.copy_rates_range(symbol, mt5.TIMEFRAME_D1, start_dt, end_dt_exclusive)
+    except Exception:
+        rates = None
+
+    # Fallback: fetch recent N days and filter
     if rates is None:
+        day_count = (end - start).days + 1
+        if day_count <= 0:
+            return {}
+        try:
+            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, day_count)
+        except Exception:
+            rates = None
+
+    # rates may be a list/tuple or a numpy array; avoid truthiness on arrays
+    if rates is None:
+        return price_by_date
+    try:
+        if len(rates) == 0:
+            return price_by_date
+    except TypeError:
+        # If object has no len(), fall back to empty mapping
         return price_by_date
 
     for rate in rates:
