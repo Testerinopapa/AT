@@ -4,7 +4,9 @@ import json
 import os
 import time
 import signal
+import pickle
 from datetime import datetime
+from pathlib import Path
 
 # Import new strategy system
 from strategies import (
@@ -21,6 +23,8 @@ from risk_manager import RiskManager
 # Import logging and analytics
 from trade_logger import TradeLogger
 from analytics import PerformanceAnalytics
+from agents import EnvironmentAgent
+from market_data.environment import MarketEnvironment
 
 # ------------------------------
 # GLOBAL STATE
@@ -52,6 +56,14 @@ try:
 except FileNotFoundError:
     print("❌ settings.json not found. Please create config/settings.json")
     sys.exit(1)
+
+MARKET_DATA_CONFIG = config.get("market_data", {}) if isinstance(config, dict) else {}
+MARKET_MODE = str(MARKET_DATA_CONFIG.get("mode", "live")).strip().lower()
+if MARKET_MODE not in {"live", "snapshot"}:
+    print(f"⚠️  Unknown market_data.mode '{MARKET_MODE}' - defaulting to live mode.")
+    MARKET_MODE = "live"
+
+SNAPSHOT_PATH = MARKET_DATA_CONFIG.get("snapshot_path", "data/env_data.pkl")
 
 SYMBOL = config.get("symbol", "EURUSD")
 VOLUME = float(config.get("volume", 0.1))
@@ -140,6 +152,9 @@ print(f"[Config] Risk Manager initialized")
 print(f"[Config] Risk per trade: {RISK_MANAGER.risk_percentage}%")
 print(f"[Config] SL/TP method: {RISK_MANAGER.sl_method}/{RISK_MANAGER.tp_method}")
 print(f"[Config] Daily limits: Loss=${RISK_MANAGER.daily_loss_limit}, Profit=${RISK_MANAGER.daily_profit_target}")
+print(f"[Config] Market data mode: {MARKET_MODE}")
+if MARKET_MODE == "snapshot":
+    print(f"[Config] Snapshot path: {SNAPSHOT_PATH}")
 
 # Initialize Trade Logger and Analytics
 TRADE_LOGGER = TradeLogger()
@@ -557,11 +572,135 @@ def run_continuous_trading():
         print("✅ Shutdown complete.")
 
 
+def load_environment_snapshots(path_str: str):
+    """Load pickled market environment snapshots from disk."""
+
+    candidate = Path(path_str)
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+
+    if not candidate.exists():
+        print(f"❌ Snapshot file not found: {candidate}")
+        sys.exit(1)
+
+    try:
+        with candidate.open("rb") as handle:
+            snapshots = pickle.load(handle)
+    except (OSError, pickle.UnpicklingError) as exc:
+        print(f"❌ Failed to load snapshot data from {candidate}: {exc}")
+        sys.exit(1)
+
+    if not isinstance(snapshots, dict):
+        print("❌ Snapshot payload must be a dictionary keyed by date.")
+        sys.exit(1)
+
+    return snapshots, candidate
+
+
+def run_snapshot_replay():
+    """Replay pre-collected market environment snapshots."""
+
+    global running
+
+    snapshots, resolved_path = load_environment_snapshots(SNAPSHOT_PATH)
+    environment = MarketEnvironment(snapshots=snapshots, trade_logger=TRADE_LOGGER)
+    first_state = environment.reset()
+
+    if first_state is None:
+        print(f"⚠️  Snapshot file {resolved_path} does not contain any entries.")
+        return
+
+    agent = EnvironmentAgent(
+        strategy_manager=STRATEGY_MANAGER,
+        symbol=SYMBOL,
+        trade_logger=TRADE_LOGGER,
+        llm_executor=MARKET_DATA_CONFIG.get("llm_executor"),
+        llm_config=MARKET_DATA_CONFIG.get("llm_config"),
+    )
+
+    total_snapshots = len(snapshots)
+    print("\n" + "=" * 80)
+    print(f"🧪 Starting snapshot replay ({total_snapshots} snapshots from {resolved_path})")
+    print("=" * 80)
+
+    iteration = 0
+    while running:
+        current_date, snapshot, done = environment.step()
+        if snapshot is None:
+            print("\n📁 No additional snapshots available. Ending replay.")
+            break
+
+        iteration += 1
+        date_label = current_date.isoformat() if hasattr(current_date, "isoformat") else str(current_date)
+
+        price_block = snapshot.get("price") if isinstance(snapshot, dict) else None
+        price = price_block.get("close") if isinstance(price_block, dict) else None
+
+        news_source = snapshot.get("news") if isinstance(snapshot, dict) else None
+        if isinstance(news_source, dict):
+            news_items = EnvironmentAgent._ensure_iterable(news_source.get("items"))
+        else:
+            news_items = EnvironmentAgent._ensure_iterable(news_source)
+
+        filing_q_items = EnvironmentAgent._ensure_iterable(
+            snapshot.get("filing_q") if isinstance(snapshot, dict) else None
+        )
+        filing_k_items = EnvironmentAgent._ensure_iterable(
+            snapshot.get("filing_k") if isinstance(snapshot, dict) else None
+        )
+
+        future_return = snapshot.get("future_return") if isinstance(snapshot, dict) else None
+
+        step_result = agent.step(
+            date_label,
+            price,
+            filing_k_items,
+            filing_q_items,
+            news_items,
+            future_return=future_return,
+        )
+
+        decision = step_result.get("decision", "NONE")
+        rationale = step_result.get("rationale", "")
+        signals = step_result.get("signals", {})
+
+        print("\n" + "-" * 80)
+        print(f"📅 Snapshot #{iteration} | Date: {date_label}")
+        if price is not None:
+            print(f"💲 Close price: {price}")
+        if future_return is not None:
+            print(f"🔮 Future return: {future_return:+.2%}")
+        print(f"📈 Strategy signals: {signals}")
+        print(f"🧠 Decision: {decision}")
+        if rationale:
+            print(f"   ↳ Rationale: {rationale}")
+        if "llm_output" in step_result:
+            print(f"🤖 LLM output: {step_result['llm_output']}")
+
+        can_trade, reason = RISK_MANAGER.can_trade()
+        print(f"🛡️  Risk check: {reason}")
+
+        if not can_trade:
+            print("🚫 Trade skipped due to risk limits.")
+        elif decision in {"BUY", "SELL"}:
+            print(f"✅ Simulated {decision} action triggered in snapshot mode.")
+        else:
+            print("ℹ️  No actionable trade signal for this snapshot.")
+
+        if done:
+            print("\n📦 Reached end of snapshot dataset.")
+            break
+
+    print(f"\n🔚 Snapshot replay completed after {iteration} steps.")
+
+
 # ------------------------------
 # MAIN EXECUTION
 # ------------------------------
 if __name__ == "__main__":
-    if ENABLE_CONTINUOUS:
+    if MARKET_MODE == "snapshot":
+        run_snapshot_replay()
+    elif ENABLE_CONTINUOUS:
         run_continuous_trading()
     else:
         run_single_trade()
