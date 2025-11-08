@@ -35,6 +35,8 @@ from analytics import PerformanceAnalytics
 from agents import EnvironmentAgent
 from market_data.environment import MarketEnvironment
 
+from mt5_helpers import OrderRequest, close_position_by_ticket, send_market_order
+
 
 MT5_TIMEFRAME_MAP = {
     "M1": mt5.TIMEFRAME_M1,
@@ -333,7 +335,7 @@ elif MARKET_MODE == "backtest":
     print(
         "[Config] Backtest history window: "
         f"{_format_history_bound(history_section, 'start')}"
-        f" → {_format_history_bound(history_section, 'end')}"
+        f" -> {_format_history_bound(history_section, 'end')}"
     )
     timezone_label = history_section.get("timezone_name", "UTC")
     if history_section.get("timezone") is None and timezone_label:
@@ -520,27 +522,24 @@ def execute_trade(symbol, action):
         print(f"🚫 Trade validation failed: {validation_reason}")
         return False
 
-    # Determine order type
-    order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
-
-    # Build order request
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": symbol,
-        "volume": volume,
-        "type": order_type,
-        "price": price,
-        "sl": sl,
-        "tp": tp,
-        "deviation": DEVIATION,
-        "magic": 123456,
-        "comment": f"Python MT5 Bot {action}",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_FOK,
-    }
+    order_request = OrderRequest(
+        symbol=symbol,
+        action=action,
+        volume=volume,
+        price=price,
+        sl=sl,
+        tp=tp,
+        deviation=DEVIATION,
+        magic=123456,
+        comment=f"Python MT5 Bot {action}",
+    )
 
     # Execute order
-    result = mt5.order_send(request)
+    try:
+        result = send_market_order(order_request)
+    except RuntimeError as exc:
+        print(f"❌ Order send failed: {exc}")
+        return False
 
     if result is None:
         print("❌ Order send failed - no result returned")
@@ -576,41 +575,25 @@ def close_position(position):
     Returns:
         bool: True if closed successfully, False otherwise
     """
-    tick = mt5.symbol_info_tick(position.symbol)
-    if tick is None:
-        print(f"❌ Could not get tick data for {position.symbol}")
+    try:
+        result = close_position_by_ticket(
+            ticket=position.ticket,
+            symbol=position.symbol,
+            volume=position.volume,
+            side="BUY" if position.type == mt5.ORDER_TYPE_BUY else "SELL",
+            deviation=DEVIATION,
+            magic=234000,
+            comment="python script close",
+        )
+    except RuntimeError as exc:
+        print(f"❌ Failed to close position #{position.ticket}: {exc}")
         return False
-
-    # Determine close price and order type
-    if position.type == mt5.ORDER_TYPE_BUY:
-        close_price = tick.bid
-        order_type = mt5.ORDER_TYPE_SELL
-        action_str = "CLOSE_BUY"
-    else:
-        close_price = tick.ask
-        order_type = mt5.ORDER_TYPE_BUY
-        action_str = "CLOSE_SELL"
-
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": position.symbol,
-        "volume": position.volume,
-        "type": order_type,
-        "position": position.ticket,
-        "price": close_price,
-        "deviation": DEVIATION,
-        "magic": 234000,
-        "comment": "python script close",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_FOK,
-    }
-
-    result = mt5.order_send(request)
 
     if result.retcode == mt5.TRADE_RETCODE_DONE:
         profit = position.profit
         commission = position.commission if hasattr(position, 'commission') else 0
         swap = position.swap if hasattr(position, 'swap') else 0
+        close_price = result.price if hasattr(result, "price") else None
 
         print(f"✅ Position #{position.ticket} closed | Profit: {profit:.2f}")
 
@@ -803,7 +786,7 @@ def run_backtest():
     print(f"Timeframe: {BACKTEST_CONFIG.get('timeframe_key')}")
     print(
         f"History window: {_format_history_bound(history_section, 'start')}"
-        f" → {_format_history_bound(history_section, 'end')}"
+        f" -> {_format_history_bound(history_section, 'end')}"
     )
     print(
         f"Timezone: {history_section.get('timezone_name')} | "
@@ -817,6 +800,133 @@ def run_backtest():
         f"model={commission_cfg.get('model')}, rate={commission_cfg.get('rate')}, "
         f"per_trade={commission_cfg.get('per_trade')}"
     )
+    print("\n⚠️  Backtesting execution is not implemented yet. This is a configuration preview only.")
+
+
+def run_backtest_bt():
+    """Run Backtrader backtest via StrategyBridge with Yahoo data feed.
+
+    - Mirrors live decision flow using EnvironmentAgent/StrategyManager
+    - Avoids MT5 by disabling RiskManager inside the bridge
+    """
+
+    symbol = str(config.get("symbol", "EURUSD")).upper()
+    timeframe_key = BACKTEST_CONFIG.get("timeframe_key", "H1")
+    history_section = BACKTEST_CONFIG.get("history", {})
+
+    try:
+        import backtrader as bt  # type: ignore
+        # Compatibility shims for Backtrader 1.9.78
+        if not hasattr(bt.stores, "Store") and hasattr(bt.stores, "VCStore"):
+            setattr(bt.stores, "Store", bt.stores.VCStore)
+        if not hasattr(bt.brokers, "BrokerBase") and hasattr(bt.brokers, "BrokerBack"):
+            setattr(bt.brokers, "BrokerBase", bt.brokers.BrokerBack)
+        from backtesting.strategy_adapter import StrategyBridge  # type: ignore
+    except Exception as exc:
+        print(f"ERROR: Backtrader not available: {exc}")
+        return
+
+    interval_map = {
+        "M1": "1m",
+        "M5": "5m",
+        "M15": "15m",
+        "M30": "30m",
+        "H1": "1h",
+        "H4": "1h",
+        "D1": "1d",
+    }
+    yf_interval = interval_map.get(str(timeframe_key).upper(), "1h")
+
+    # Fetch data from Yahoo Finance
+    df = None
+    try:
+        import yfinance as yf  # type: ignore
+        start = history_section.get("start")
+        end = history_section.get("end")
+        ticker = "EURUSD=X" if symbol == "EURUSD" else symbol
+        if start and end:
+            df = yf.download(ticker, start=start, end=end, interval=yf_interval, auto_adjust=False, progress=False)
+        else:
+            period = "7d" if yf_interval != "1d" else "30d"
+            df = yf.download(ticker, period=period, interval=yf_interval, auto_adjust=False, progress=False)
+    except Exception as exc:
+        print(f"ERROR: Failed to fetch data for backtest: {exc}")
+
+    if df is None or getattr(df, "empty", True):
+        # Fallback: try recent 7 days for intraday intervals
+        try:
+            import yfinance as yf  # type: ignore
+            ticker = "EURUSD=X" if symbol == "EURUSD" else symbol
+            df = yf.download(ticker, period="7d", interval=yf_interval, auto_adjust=False, progress=False)
+            if df is None or getattr(df, "empty", True):
+                print("ERROR: No historical data available for backtest.")
+                return
+            else:
+                print("[Backtest] Falling back to last 7 days due to provider limits.")
+        except Exception:
+            print("ERROR: No historical data available for backtest.")
+            return
+
+    # Flatten possible MultiIndex columns from Yahoo and standardize names
+    df = df.dropna()
+    if hasattr(df, "columns") and any(isinstance(c, tuple) for c in df.columns):
+        cols = []
+        for c in df.columns:
+            if isinstance(c, tuple):
+                name = None
+                for part in c:
+                    if str(part).lower() in {"open", "high", "low", "close", "adj close", "volume"}:
+                        name = str(part)
+                        break
+                cols.append(name or str(c[0]))
+            else:
+                cols.append(str(c))
+        df.columns = cols
+    rename = {"Adj Close": "Close", "adj close": "Close"}
+    df = df.rename(columns=rename)
+    if not set(["Open", "High", "Low", "Close", "Volume"]).issubset(set(df.columns)):
+        print("ERROR: Data does not include OHLCV columns after normalization.")
+        return
+    data = bt.feeds.PandasData(dataname=df[["Open", "High", "Low", "Close", "Volume"]])
+
+    initial_cash = float(BACKTEST_CONFIG.get("initial_cash", 100000.0))
+    commission_cfg = BACKTEST_CONFIG.get("commission", {})
+    rate = float(commission_cfg.get("rate", 0.0) or 0.0)
+
+    cerebro = bt.Cerebro()
+    cerebro.broker.set_cash(initial_cash)
+    if rate > 0:
+        cerebro.broker.setcommission(commission=rate)
+    cerebro.adddata(data, name=f"{symbol}-{timeframe_key}")
+
+    cerebro.addstrategy(
+        StrategyBridge,
+        strategy_manager=STRATEGY_MANAGER,
+        symbol=symbol,
+        trade_logger=TRADE_LOGGER,
+        risk_manager=None,
+        analytics=ANALYTICS,
+        agent_kwargs=dict(memory_limits={"short": 64, "mid": 48, "long": 32}),
+        default_volume=float(config.get("volume", 0.1)),
+    )
+
+    print("\n" + "=" * 80)
+    print("Running Backtrader backtest via StrategyBridge")
+    print("=" * 80)
+    print(f"Symbol: {symbol}")
+    print(f"Timeframe: {timeframe_key} (Yahoo: {yf_interval})")
+    print(
+        "History window: "
+        f"{_format_history_bound(history_section, 'start')} "
+        f"-> {_format_history_bound(history_section, 'end')}"
+    )
+    print(f"Initial cash: {initial_cash:.2f} | Commission rate: {rate}")
+
+    try:
+        cerebro.run(stdstats=False)
+        print(f"[Backtest] Completed. Portfolio value: {cerebro.broker.getvalue():.2f}")
+    except Exception as exc:
+        print(f"ERROR: Backtest execution failed: {exc}")
     print(
         "\n⚠️  Backtesting execution is not implemented yet. "
         "This is a configuration preview only."
@@ -927,8 +1037,10 @@ if __name__ == "__main__":
     if MARKET_MODE == "snapshot":
         run_snapshot_replay()
     elif MARKET_MODE == "backtest":
-        run_backtest()
+        run_backtest_bt()
     elif ENABLE_CONTINUOUS:
         run_continuous_trading()
     else:
         run_single_trade()
+
+
