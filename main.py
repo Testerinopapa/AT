@@ -8,14 +8,6 @@ import pickle
 from datetime import datetime
 from pathlib import Path
 
-try:
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-except ImportError:  # pragma: no cover - Python < 3.9 fallback
-    ZoneInfo = None
-
-    class ZoneInfoNotFoundError(Exception):
-        """Fallback exception when zoneinfo is unavailable."""
-
 
 # Import new strategy system
 from strategies import (
@@ -392,12 +384,8 @@ def get_open_positions(symbol=None):
     Returns:
         List of open positions
     """
-    if symbol:
-        positions = mt5.positions_get(symbol=symbol)
-    else:
-        positions = mt5.positions_get()
-
-    return positions if positions is not None else []
+    positions = shared_get_open_positions(symbol=symbol, mt5_module=mt5)
+    return list(positions)
 
 
 def has_open_position(symbol):
@@ -410,8 +398,7 @@ def has_open_position(symbol):
     Returns:
         Boolean indicating if position exists
     """
-    positions = get_open_positions(symbol)
-    return len(positions) > 0
+    return shared_has_open_position(symbol, mt5_module=mt5)
 
 
 def can_open_new_trade():
@@ -421,8 +408,10 @@ def can_open_new_trade():
     Returns:
         Boolean indicating if new trade can be opened
     """
-    all_positions = get_open_positions()
-    return len(all_positions) < MAX_CONCURRENT_TRADES
+    return shared_can_open_new_trade(
+        max_concurrent_trades=MAX_CONCURRENT_TRADES,
+        get_positions=get_open_positions,
+    )
 
 def log_trade(action, result, volume, price, sl, tp, strategy="Combined"):
     """
@@ -437,26 +426,18 @@ def log_trade(action, result, volume, price, sl, tp, strategy="Combined"):
         tp: Take profit
         strategy: Strategy name
     """
-    # Use new enhanced logger
-    TRADE_LOGGER.log_trade_open(
+    shared_log_trade(
         symbol=SYMBOL,
         action=action,
         result=result,
         volume=volume,
-        entry_price=price,
+        price=price,
         sl=sl,
         tp=tp,
-        strategy=strategy
+        strategy=strategy,
+        trade_logger=TRADE_LOGGER,
+        log_path=LOG_PATH,
     )
-
-    # Also keep old format for backward compatibility
-    with open(LOG_PATH, "a") as f:
-        f.write(
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-            f"{action:<12} | "
-            f"{result.order:<12} | "
-            f"Price: {price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Retcode: {result.retcode}\n"
-        )
 
 
 def execute_trade(symbol, action):
@@ -515,13 +496,17 @@ def execute_trade(symbol, action):
     order_request = OrderRequest(
         symbol=symbol,
         action=action,
-        volume=volume,
-        price=price,
-        sl=sl,
-        tp=tp,
+        risk_manager=RISK_MANAGER,
+        trade_logger=TRADE_LOGGER,
+        strategy_manager=STRATEGY_MANAGER,
         deviation=DEVIATION,
+        log_path=LOG_PATH,
+        default_volume=VOLUME,
+        config=config,
         magic=123456,
-        comment=f"Python MT5 Bot {action}",
+        comment_prefix="Python MT5 Bot",
+        mt5_module=mt5,
+        order_sender=lambda request: mt5.order_send(request.to_request()),
     )
 
     # Execute order
@@ -765,11 +750,10 @@ def load_environment_snapshots(path_str: str):
 
 
 def run_backtest():
-    """Placeholder runner for future backtesting workflows."""
-
-    history_section = BACKTEST_CONFIG.get("history", {})
+    """Run the configured backtest using the Backtrader bridge."""
 
     print("\n" + "=" * 80)
+
     print("Backtest configuration preview")
     print("=" * 80)
     print(f"Symbol: {SYMBOL}")
@@ -784,12 +768,29 @@ def run_backtest():
     )
     print(f"Initial cash: {BACKTEST_CONFIG.get('initial_cash')}")
 
-    commission_cfg = BACKTEST_CONFIG.get("commission", {})
+    print("🧪 Starting Backtrader backtest")
+    print("=" * 80)
+
+
+    history_section = BACKTEST_CONFIG.get("history", {})
+    print(f"[Backtest] Timeframe: {BACKTEST_CONFIG.get('timeframe_key')}")
     print(
-        "Commission: "
+        f"[Backtest] History: {format_history_bound(history_section, 'start')}"
+        f" → {format_history_bound(history_section, 'end')}"
+    )
+    tz_label = history_section.get("timezone_name", "UTC")
+    if history_section.get("timezone") is None and tz_label:
+        tz_label = f"{tz_label} (unresolved)"
+    print(f"[Backtest] Timezone: {tz_label}")
+    print(f"[Backtest] Align to broker timezone: {history_section.get('align_to_broker_timezone')}")
+    print(f"[Backtest] Initial cash: {BACKTEST_CONFIG.get('initial_cash')}")
+    commission_cfg = BACKTEST_CONFIG.get('commission', {})
+    print(
+        "[Backtest] Commission: "
         f"model={commission_cfg.get('model')}, rate={commission_cfg.get('rate')}, "
         f"per_trade={commission_cfg.get('per_trade')}"
     )
+
     print("\nWARNING: Backtesting execution is not implemented yet. This is a configuration preview only.")
 
 
@@ -921,6 +922,29 @@ def run_backtest_bt():
         "\nWARNING:  Backtesting execution is not implemented yet. "
         "This is a configuration preview only."
     )
+
+
+    try:
+        run_backtest_workflow(
+            config=config,
+            strategy_manager=STRATEGY_MANAGER,
+            risk_manager=RISK_MANAGER,
+            trade_logger=TRADE_LOGGER,
+            analytics=ANALYTICS,
+        )
+    except Exception as exc:
+        print(f"❌ Backtest execution failed: {exc}")
+        raise
+    finally:
+        print("\n🔚 MT5 connection closed.")
+        mt5.shutdown()
+        if hasattr(TRADE_LOGGER, "text_log"):
+            try:
+                with open(TRADE_LOGGER.text_log, "a"):
+                    pass
+            except OSError:
+                print("⚠️  Unable to touch trade log file during shutdown.")
+
 
 
 def run_snapshot_replay():
