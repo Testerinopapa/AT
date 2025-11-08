@@ -335,7 +335,7 @@ elif MARKET_MODE == "backtest":
     print(
         "[Config] Backtest history window: "
         f"{_format_history_bound(history_section, 'start')}"
-        f" → {_format_history_bound(history_section, 'end')}"
+        f" -> {_format_history_bound(history_section, 'end')}"
     )
     timezone_label = history_section.get("timezone_name", "UTC")
     if history_section.get("timezone") is None and timezone_label:
@@ -786,7 +786,7 @@ def run_backtest():
     print(f"Timeframe: {BACKTEST_CONFIG.get('timeframe_key')}")
     print(
         f"History window: {_format_history_bound(history_section, 'start')}"
-        f" → {_format_history_bound(history_section, 'end')}"
+        f" -> {_format_history_bound(history_section, 'end')}"
     )
     print(
         f"Timezone: {history_section.get('timezone_name')} | "
@@ -800,6 +800,133 @@ def run_backtest():
         f"model={commission_cfg.get('model')}, rate={commission_cfg.get('rate')}, "
         f"per_trade={commission_cfg.get('per_trade')}"
     )
+    print("\n⚠️  Backtesting execution is not implemented yet. This is a configuration preview only.")
+
+
+def run_backtest_bt():
+    """Run Backtrader backtest via StrategyBridge with Yahoo data feed.
+
+    - Mirrors live decision flow using EnvironmentAgent/StrategyManager
+    - Avoids MT5 by disabling RiskManager inside the bridge
+    """
+
+    symbol = str(config.get("symbol", "EURUSD")).upper()
+    timeframe_key = BACKTEST_CONFIG.get("timeframe_key", "H1")
+    history_section = BACKTEST_CONFIG.get("history", {})
+
+    try:
+        import backtrader as bt  # type: ignore
+        # Compatibility shims for Backtrader 1.9.78
+        if not hasattr(bt.stores, "Store") and hasattr(bt.stores, "VCStore"):
+            setattr(bt.stores, "Store", bt.stores.VCStore)
+        if not hasattr(bt.brokers, "BrokerBase") and hasattr(bt.brokers, "BrokerBack"):
+            setattr(bt.brokers, "BrokerBase", bt.brokers.BrokerBack)
+        from backtesting.strategy_adapter import StrategyBridge  # type: ignore
+    except Exception as exc:
+        print(f"ERROR: Backtrader not available: {exc}")
+        return
+
+    interval_map = {
+        "M1": "1m",
+        "M5": "5m",
+        "M15": "15m",
+        "M30": "30m",
+        "H1": "1h",
+        "H4": "1h",
+        "D1": "1d",
+    }
+    yf_interval = interval_map.get(str(timeframe_key).upper(), "1h")
+
+    # Fetch data from Yahoo Finance
+    df = None
+    try:
+        import yfinance as yf  # type: ignore
+        start = history_section.get("start")
+        end = history_section.get("end")
+        ticker = "EURUSD=X" if symbol == "EURUSD" else symbol
+        if start and end:
+            df = yf.download(ticker, start=start, end=end, interval=yf_interval, auto_adjust=False, progress=False)
+        else:
+            period = "7d" if yf_interval != "1d" else "30d"
+            df = yf.download(ticker, period=period, interval=yf_interval, auto_adjust=False, progress=False)
+    except Exception as exc:
+        print(f"ERROR: Failed to fetch data for backtest: {exc}")
+
+    if df is None or getattr(df, "empty", True):
+        # Fallback: try recent 7 days for intraday intervals
+        try:
+            import yfinance as yf  # type: ignore
+            ticker = "EURUSD=X" if symbol == "EURUSD" else symbol
+            df = yf.download(ticker, period="7d", interval=yf_interval, auto_adjust=False, progress=False)
+            if df is None or getattr(df, "empty", True):
+                print("ERROR: No historical data available for backtest.")
+                return
+            else:
+                print("[Backtest] Falling back to last 7 days due to provider limits.")
+        except Exception:
+            print("ERROR: No historical data available for backtest.")
+            return
+
+    # Flatten possible MultiIndex columns from Yahoo and standardize names
+    df = df.dropna()
+    if hasattr(df, "columns") and any(isinstance(c, tuple) for c in df.columns):
+        cols = []
+        for c in df.columns:
+            if isinstance(c, tuple):
+                name = None
+                for part in c:
+                    if str(part).lower() in {"open", "high", "low", "close", "adj close", "volume"}:
+                        name = str(part)
+                        break
+                cols.append(name or str(c[0]))
+            else:
+                cols.append(str(c))
+        df.columns = cols
+    rename = {"Adj Close": "Close", "adj close": "Close"}
+    df = df.rename(columns=rename)
+    if not set(["Open", "High", "Low", "Close", "Volume"]).issubset(set(df.columns)):
+        print("ERROR: Data does not include OHLCV columns after normalization.")
+        return
+    data = bt.feeds.PandasData(dataname=df[["Open", "High", "Low", "Close", "Volume"]])
+
+    initial_cash = float(BACKTEST_CONFIG.get("initial_cash", 100000.0))
+    commission_cfg = BACKTEST_CONFIG.get("commission", {})
+    rate = float(commission_cfg.get("rate", 0.0) or 0.0)
+
+    cerebro = bt.Cerebro()
+    cerebro.broker.set_cash(initial_cash)
+    if rate > 0:
+        cerebro.broker.setcommission(commission=rate)
+    cerebro.adddata(data, name=f"{symbol}-{timeframe_key}")
+
+    cerebro.addstrategy(
+        StrategyBridge,
+        strategy_manager=STRATEGY_MANAGER,
+        symbol=symbol,
+        trade_logger=TRADE_LOGGER,
+        risk_manager=None,
+        analytics=ANALYTICS,
+        agent_kwargs=dict(memory_limits={"short": 64, "mid": 48, "long": 32}),
+        default_volume=float(config.get("volume", 0.1)),
+    )
+
+    print("\n" + "=" * 80)
+    print("Running Backtrader backtest via StrategyBridge")
+    print("=" * 80)
+    print(f"Symbol: {symbol}")
+    print(f"Timeframe: {timeframe_key} (Yahoo: {yf_interval})")
+    print(
+        "History window: "
+        f"{_format_history_bound(history_section, 'start')} "
+        f"-> {_format_history_bound(history_section, 'end')}"
+    )
+    print(f"Initial cash: {initial_cash:.2f} | Commission rate: {rate}")
+
+    try:
+        cerebro.run(stdstats=False)
+        print(f"[Backtest] Completed. Portfolio value: {cerebro.broker.getvalue():.2f}")
+    except Exception as exc:
+        print(f"ERROR: Backtest execution failed: {exc}")
     print(
         "\n⚠️  Backtesting execution is not implemented yet. "
         "This is a configuration preview only."
@@ -910,8 +1037,10 @@ if __name__ == "__main__":
     if MARKET_MODE == "snapshot":
         run_snapshot_replay()
     elif MARKET_MODE == "backtest":
-        run_backtest()
+        run_backtest_bt()
     elif ENABLE_CONTINUOUS:
         run_continuous_trading()
     else:
         run_single_trade()
+
+

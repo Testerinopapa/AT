@@ -22,6 +22,8 @@ The bridge intentionally mirrors the live workflow:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -61,6 +63,9 @@ class StrategyBridge(bt.Strategy):
         analytics=None,
         agent_kwargs=None,
         default_volume=0.1,
+        # Decision logging
+        decision_log_path=None,   # e.g., "logs/llm_decisions.jsonl"
+        log_all_decisions=False,  # when False, only logs if LLM fields present
     )
 
     def __init__(self) -> None:
@@ -85,6 +90,8 @@ class StrategyBridge(bt.Strategy):
         self._pending_orders: Dict[int, Dict[str, Any]] = {}
         self._ticket_counter = 0
         self._last_action: Optional[str] = None
+        self._decision_log_path = self.p.decision_log_path
+        self._log_all_decisions = bool(self.p.log_all_decisions)
 
     # ------------------------------------------------------------------
     # Backtrader life-cycle hooks
@@ -117,6 +124,9 @@ class StrategyBridge(bt.Strategy):
             combined_news,
             future_return=future_return,
         )
+
+        # Optional per-bar decision logging
+        self._maybe_log_decision(date_label, close_price, step_result)
 
         decision = self._resolve_decision(step_result)
 
@@ -341,4 +351,33 @@ class StrategyBridge(bt.Strategy):
                 generate()
             except TypeError:
                 generate(30)
+
+    # ------------------------------------------------------------------
+    # Helpers: decision logging
+    # ------------------------------------------------------------------
+    def _maybe_log_decision(self, date_label: str, price: Optional[float], step_result: Dict[str, Any]) -> None:
+        path = self._decision_log_path
+        if not path:
+            return
+        has_llm = ("llm_output" in step_result) or ("prompt" in step_result)
+        if not self._log_all_decisions and not has_llm:
+            return
+        payload = {
+            "date": date_label,
+            "price": price,
+            "signals": step_result.get("signals"),
+            "decision": step_result.get("decision"),
+            "rationale": step_result.get("rationale"),
+        }
+        if "prompt" in step_result:
+            payload["prompt"] = step_result.get("prompt")
+        if "llm_output" in step_result:
+            payload["llm_output"] = step_result.get("llm_output")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "a", encoding="utf-8") as fp:
+                fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception:
+            # Logging failures should never break a backtest
+            pass
 
