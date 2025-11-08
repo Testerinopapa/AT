@@ -8,14 +8,6 @@ import pickle
 from datetime import datetime
 from pathlib import Path
 
-try:
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-except ImportError:  # pragma: no cover - Python < 3.9 fallback
-    ZoneInfo = None
-
-    class ZoneInfoNotFoundError(Exception):
-        """Fallback exception when zoneinfo is unavailable."""
-
 
 # Import new strategy system
 from strategies import (
@@ -35,173 +27,20 @@ from analytics import PerformanceAnalytics
 from agents import EnvironmentAgent
 from market_data.environment import MarketEnvironment
 
-from mt5_helpers import OrderRequest, close_position_by_ticket, send_market_order
-
-
-MT5_TIMEFRAME_MAP = {
-    "M1": mt5.TIMEFRAME_M1,
-    "M5": mt5.TIMEFRAME_M5,
-    "M15": mt5.TIMEFRAME_M15,
-    "M30": mt5.TIMEFRAME_M30,
-    "H1": mt5.TIMEFRAME_H1,
-    "H4": mt5.TIMEFRAME_H4,
-    "D1": mt5.TIMEFRAME_D1,
-}
-
-
-def _resolve_timezone(name: str):
-    """Resolve a timezone name into a ZoneInfo object when available."""
-
-    if not name:
-        return None
-
-    if ZoneInfo is None:
-        print(
-            f"⚠️  zoneinfo module not available; unable to localize timezone '{name}'."
-        )
-        return None
-
-    try:
-        return ZoneInfo(name)
-    except ZoneInfoNotFoundError:
-        print(f"⚠️  Unknown timezone '{name}'. Falling back to naive datetimes.")
-        return None
-
-
-def _parse_datetime(candidate, tzinfo):
-    """Parse ISO datetime strings or timestamps into datetime objects."""
-
-    if candidate in (None, ""):
-        return None
-
-    if isinstance(candidate, (int, float)):
-        try:
-            return datetime.fromtimestamp(candidate, tz=tzinfo)
-        except (OverflowError, OSError, ValueError):
-            print(f"⚠️  Invalid timestamp '{candidate}' in backtest history config.")
-            return None
-
-    if isinstance(candidate, str):
-        try:
-            parsed = datetime.fromisoformat(candidate)
-        except ValueError:
-            print(f"⚠️  Unable to parse datetime string '{candidate}'.")
-            return None
-
-        if parsed.tzinfo is None and tzinfo is not None:
-            parsed = parsed.replace(tzinfo=tzinfo)
-
-        return parsed
-
-    print(f"⚠️  Unsupported datetime value '{candidate}' ({type(candidate).__name__}).")
-    return None
-
-
-def parse_backtest_config(raw_config):
-    """Normalize backtest configuration and apply sensible defaults."""
-
-    default_timezone_name = "UTC"
-    default_timezone = _resolve_timezone(default_timezone_name)
-
-    normalized = {
-        "timeframe_key": "H1",
-        "timeframe": MT5_TIMEFRAME_MAP.get("H1", mt5.TIMEFRAME_H1),
-        "history": {
-            "start": None,
-            "start_raw": None,
-            "end": None,
-            "end_raw": None,
-            "timezone_name": default_timezone_name,
-            "timezone": default_timezone,
-            "align_to_broker_timezone": False,
-        },
-        "initial_cash": 100000.0,
-        "commission": {
-            "model": "percentage",
-            "rate": 0.0002,
-            "per_trade": 0.0,
-        },
-    }
-
-    if not isinstance(raw_config, dict):
-        return normalized
-
-    timeframe_key = str(raw_config.get("timeframe", normalized["timeframe_key"])).upper()
-    if timeframe_key not in MT5_TIMEFRAME_MAP:
-        print(
-            f"⚠️  Unsupported backtest timeframe '{timeframe_key}'. Defaulting to {normalized['timeframe_key']}."
-        )
-        timeframe_key = normalized["timeframe_key"]
-
-    normalized["timeframe_key"] = timeframe_key
-    normalized["timeframe"] = MT5_TIMEFRAME_MAP.get(timeframe_key, normalized["timeframe"])
-
-    history_raw = raw_config.get("history", {})
-    if not isinstance(history_raw, dict):
-        history_raw = {}
-
-    timezone_name = str(
-        history_raw.get("timezone", normalized["history"]["timezone_name"])
-    )
-    timezone_obj = _resolve_timezone(timezone_name)
-
-    history = normalized["history"]
-    history["timezone_name"] = timezone_name
-    history["timezone"] = timezone_obj
-    history["align_to_broker_timezone"] = bool(
-        history_raw.get(
-            "align_to_broker_timezone", history["align_to_broker_timezone"]
-        )
-    )
-
-    history["start_raw"] = history_raw.get("start")
-    history["end_raw"] = history_raw.get("end")
-    history["start"] = _parse_datetime(history["start_raw"], timezone_obj)
-    history["end"] = _parse_datetime(history["end_raw"], timezone_obj)
-
-    try:
-        normalized["initial_cash"] = float(
-            raw_config.get("initial_cash", normalized["initial_cash"])
-        )
-    except (TypeError, ValueError):
-        print(
-            f"⚠️  Invalid initial_cash '{raw_config.get('initial_cash')}'. Using default {normalized['initial_cash']}."
-        )
-
-    commission_raw = raw_config.get("commission", {})
-    commission_cfg = normalized["commission"]
-    if isinstance(commission_raw, dict):
-        if "model" in commission_raw:
-            commission_cfg["model"] = str(commission_raw["model"]).strip().lower()
-        if "rate" in commission_raw:
-            try:
-                commission_cfg["rate"] = float(commission_raw["rate"])
-            except (TypeError, ValueError):
-                print(
-                    f"⚠️  Invalid commission rate '{commission_raw.get('rate')}'. Using default {commission_cfg['rate']}."
-                )
-        if "per_trade" in commission_raw:
-            try:
-                commission_cfg["per_trade"] = float(commission_raw["per_trade"])
-            except (TypeError, ValueError):
-                fallback_value = commission_cfg.get("per_trade")
-                print(
-                    "⚠️  Invalid commission per_trade "
-                    f"'{commission_raw.get('per_trade')}'. Using default {fallback_value}."
-                )
-
-    return normalized
-
-
-def _format_history_bound(history_section, bound):
-    """Return a human-friendly representation of a history boundary."""
-
-    dt_obj = history_section.get(bound)
-    if dt_obj is not None:
-        return dt_obj.isoformat()
-
-    raw_value = history_section.get(f"{bound}_raw")
-    return raw_value if raw_value not in (None, "") else "not set"
+from backtesting.config import (
+    MT5_TIMEFRAME_MAP,
+    format_history_bound,
+    parse_backtest_config,
+)
+from backtesting.runner import run_backtest as run_backtest_workflow
+from trading import (
+    can_open_new_trade as shared_can_open_new_trade,
+    close_position as shared_close_position,
+    execute_trade as shared_execute_trade,
+    get_open_positions as shared_get_open_positions,
+    has_open_position as shared_has_open_position,
+    log_trade as shared_log_trade,
+)
 
 
 # ------------------------------
@@ -334,8 +173,8 @@ elif MARKET_MODE == "backtest":
     )
     print(
         "[Config] Backtest history window: "
-        f"{_format_history_bound(history_section, 'start')}"
-        f" → {_format_history_bound(history_section, 'end')}"
+        f"{format_history_bound(history_section, 'start')}"
+        f" → {format_history_bound(history_section, 'end')}"
     )
     timezone_label = history_section.get("timezone_name", "UTC")
     if history_section.get("timezone") is None and timezone_label:
@@ -402,12 +241,8 @@ def get_open_positions(symbol=None):
     Returns:
         List of open positions
     """
-    if symbol:
-        positions = mt5.positions_get(symbol=symbol)
-    else:
-        positions = mt5.positions_get()
-
-    return positions if positions is not None else []
+    positions = shared_get_open_positions(symbol=symbol, mt5_module=mt5)
+    return list(positions)
 
 
 def has_open_position(symbol):
@@ -420,8 +255,7 @@ def has_open_position(symbol):
     Returns:
         Boolean indicating if position exists
     """
-    positions = get_open_positions(symbol)
-    return len(positions) > 0
+    return shared_has_open_position(symbol, mt5_module=mt5)
 
 
 def can_open_new_trade():
@@ -431,8 +265,10 @@ def can_open_new_trade():
     Returns:
         Boolean indicating if new trade can be opened
     """
-    all_positions = get_open_positions()
-    return len(all_positions) < MAX_CONCURRENT_TRADES
+    return shared_can_open_new_trade(
+        max_concurrent_trades=MAX_CONCURRENT_TRADES,
+        get_positions=get_open_positions,
+    )
 
 def log_trade(action, result, volume, price, sl, tp, strategy="Combined"):
     """
@@ -447,26 +283,18 @@ def log_trade(action, result, volume, price, sl, tp, strategy="Combined"):
         tp: Take profit
         strategy: Strategy name
     """
-    # Use new enhanced logger
-    TRADE_LOGGER.log_trade_open(
+    shared_log_trade(
         symbol=SYMBOL,
         action=action,
         result=result,
         volume=volume,
-        entry_price=price,
+        price=price,
         sl=sl,
         tp=tp,
-        strategy=strategy
+        strategy=strategy,
+        trade_logger=TRADE_LOGGER,
+        log_path=LOG_PATH,
     )
-
-    # Also keep old format for backward compatibility
-    with open(LOG_PATH, "a") as f:
-        f.write(
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-            f"{action:<12} | "
-            f"{result.order:<12} | "
-            f"Price: {price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Retcode: {result.retcode}\n"
-        )
 
 
 def execute_trade(symbol, action):
@@ -480,89 +308,21 @@ def execute_trade(symbol, action):
     Returns:
         Boolean indicating success
     """
-    # Check if trading is allowed (daily limits)
-    can_trade, reason = RISK_MANAGER.can_trade()
-    if not can_trade:
-        print(f"🚫 Trading disabled: {reason}")
-        return False
-
-    print(f"📤 Sending {action} trade request...")
-
-    # Get latest prices
-    tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        print(f"❌ Could not get tick data for {symbol}")
-        return False
-
-    price = tick.ask if action == "BUY" else tick.bid
-
-    # Calculate SL/TP using Risk Manager
-    sl, tp = RISK_MANAGER.calculate_sl_tp(symbol, action, price)
-
-    # Calculate SL distance in pips for lot sizing
-    symbol_info = mt5.symbol_info(symbol)
-    if symbol_info is None:
-        print(f"❌ Could not get symbol info for {symbol}")
-        return False
-
-    point = symbol_info.point
-    sl_distance_pips = abs(price - sl) / (point * 10)  # Convert to pips
-
-    # Calculate optimal lot size (if dynamic sizing enabled)
-    if config.get("risk_management", {}).get("enable_dynamic_lot_sizing", False):
-        volume = RISK_MANAGER.calculate_lot_size(symbol, sl_distance_pips)
-        print(f"💰 Dynamic lot size: {volume} (Risk: {RISK_MANAGER.risk_percentage}%, SL: {sl_distance_pips:.1f} pips)")
-    else:
-        volume = VOLUME
-        print(f"💰 Fixed lot size: {volume}")
-
-    # Validate trade
-    is_valid, validation_reason = RISK_MANAGER.validate_trade(symbol, action, volume)
-    if not is_valid:
-        print(f"🚫 Trade validation failed: {validation_reason}")
-        return False
-
-    order_request = OrderRequest(
+    return shared_execute_trade(
         symbol=symbol,
         action=action,
-        volume=volume,
-        price=price,
-        sl=sl,
-        tp=tp,
+        risk_manager=RISK_MANAGER,
+        trade_logger=TRADE_LOGGER,
+        strategy_manager=STRATEGY_MANAGER,
         deviation=DEVIATION,
+        log_path=LOG_PATH,
+        default_volume=VOLUME,
+        config=config,
         magic=123456,
-        comment=f"Python MT5 Bot {action}",
+        comment_prefix="Python MT5 Bot",
+        mt5_module=mt5,
+        order_sender=lambda request: mt5.order_send(request.to_request()),
     )
-
-    # Execute order
-    try:
-        result = send_market_order(order_request)
-    except RuntimeError as exc:
-        print(f"❌ Order send failed: {exc}")
-        return False
-
-    if result is None:
-        print("❌ Order send failed - no result returned")
-        return False
-
-    print(f"\nTrade Result: {result}")
-
-    # Log and report result
-    if result.retcode == mt5.TRADE_RETCODE_DONE:
-        print(f"\n✅ {action} executed successfully!")
-        print(f"   Ticket: {result.order}")
-        print(f"   Price:  {result.price}")
-        print(f"   SL:     {sl}")
-        print(f"   TP:     {tp}")
-
-        # Get strategy name from manager
-        strategy_name = STRATEGY_MANAGER.method.upper()
-        log_trade(action, result, volume, price, sl, tp, strategy=strategy_name)
-        return True
-    else:
-        print(f"\n❌ {action} failed! Code {result.retcode}: {result.comment}")
-        log_trade(f"{action}_FAILED", result, volume, price, sl, tp, strategy="FAILED")
-        return False
 
 
 def close_position(position):
@@ -575,44 +335,15 @@ def close_position(position):
     Returns:
         bool: True if closed successfully, False otherwise
     """
-    try:
-        result = close_position_by_ticket(
-            ticket=position.ticket,
-            symbol=position.symbol,
-            volume=position.volume,
-            side="BUY" if position.type == mt5.ORDER_TYPE_BUY else "SELL",
-            deviation=DEVIATION,
-            magic=234000,
-            comment="python script close",
-        )
-    except RuntimeError as exc:
-        print(f"❌ Failed to close position #{position.ticket}: {exc}")
-        return False
-
-    if result.retcode == mt5.TRADE_RETCODE_DONE:
-        profit = position.profit
-        commission = position.commission if hasattr(position, 'commission') else 0
-        swap = position.swap if hasattr(position, 'swap') else 0
-        close_price = result.price if hasattr(result, "price") else None
-
-        print(f"✅ Position #{position.ticket} closed | Profit: {profit:.2f}")
-
-        # Log trade close
-        TRADE_LOGGER.log_trade_close(
-            ticket=position.ticket,
-            exit_price=close_price,
-            profit=profit,
-            commission=commission,
-            swap=swap
-        )
-
-        # Update daily P/L tracking
-        RISK_MANAGER.update_daily_pnl(profit)
-
-        return True
-    else:
-        print(f"❌ Failed to close position #{position.ticket} | Code: {result.retcode}")
-        return False
+    return shared_close_position(
+        position,
+        trade_logger=TRADE_LOGGER,
+        risk_manager=RISK_MANAGER,
+        deviation=DEVIATION,
+        magic=234000,
+        comment="python script close",
+        mt5_module=mt5,
+    )
 
 
 def trading_iteration(symbol):
@@ -775,35 +506,51 @@ def load_environment_snapshots(path_str: str):
 
 
 def run_backtest():
-    """Placeholder runner for future backtesting workflows."""
-
-    history_section = BACKTEST_CONFIG.get("history", {})
+    """Run the configured backtest using the Backtrader bridge."""
 
     print("\n" + "=" * 80)
-    print("🧪 Backtest configuration preview")
+    print("🧪 Starting Backtrader backtest")
     print("=" * 80)
-    print(f"Symbol: {SYMBOL}")
-    print(f"Timeframe: {BACKTEST_CONFIG.get('timeframe_key')}")
-    print(
-        f"History window: {_format_history_bound(history_section, 'start')}"
-        f" → {_format_history_bound(history_section, 'end')}"
-    )
-    print(
-        f"Timezone: {history_section.get('timezone_name')} | "
-        f"Align to broker: {history_section.get('align_to_broker_timezone')}"
-    )
-    print(f"Initial cash: {BACKTEST_CONFIG.get('initial_cash')}")
 
-    commission_cfg = BACKTEST_CONFIG.get("commission", {})
+    history_section = BACKTEST_CONFIG.get("history", {})
+    print(f"[Backtest] Timeframe: {BACKTEST_CONFIG.get('timeframe_key')}")
     print(
-        "Commission: "
+        f"[Backtest] History: {format_history_bound(history_section, 'start')}"
+        f" → {format_history_bound(history_section, 'end')}"
+    )
+    tz_label = history_section.get("timezone_name", "UTC")
+    if history_section.get("timezone") is None and tz_label:
+        tz_label = f"{tz_label} (unresolved)"
+    print(f"[Backtest] Timezone: {tz_label}")
+    print(f"[Backtest] Align to broker timezone: {history_section.get('align_to_broker_timezone')}")
+    print(f"[Backtest] Initial cash: {BACKTEST_CONFIG.get('initial_cash')}")
+    commission_cfg = BACKTEST_CONFIG.get('commission', {})
+    print(
+        "[Backtest] Commission: "
         f"model={commission_cfg.get('model')}, rate={commission_cfg.get('rate')}, "
         f"per_trade={commission_cfg.get('per_trade')}"
     )
-    print(
-        "\n⚠️  Backtesting execution is not implemented yet. "
-        "This is a configuration preview only."
-    )
+
+    try:
+        run_backtest_workflow(
+            config=config,
+            strategy_manager=STRATEGY_MANAGER,
+            risk_manager=RISK_MANAGER,
+            trade_logger=TRADE_LOGGER,
+            analytics=ANALYTICS,
+        )
+    except Exception as exc:
+        print(f"❌ Backtest execution failed: {exc}")
+        raise
+    finally:
+        print("\n🔚 MT5 connection closed.")
+        mt5.shutdown()
+        if hasattr(TRADE_LOGGER, "text_log"):
+            try:
+                with open(TRADE_LOGGER.text_log, "a"):
+                    pass
+            except OSError:
+                print("⚠️  Unable to touch trade log file during shutdown.")
 
 
 def run_snapshot_replay():
