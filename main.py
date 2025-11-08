@@ -35,6 +35,8 @@ from analytics import PerformanceAnalytics
 from agents import EnvironmentAgent
 from market_data.environment import MarketEnvironment
 
+from mt5_helpers import OrderRequest, close_position_by_ticket, send_market_order
+
 
 MT5_TIMEFRAME_MAP = {
     "M1": mt5.TIMEFRAME_M1,
@@ -520,27 +522,24 @@ def execute_trade(symbol, action):
         print(f"🚫 Trade validation failed: {validation_reason}")
         return False
 
-    # Determine order type
-    order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
-
-    # Build order request
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": symbol,
-        "volume": volume,
-        "type": order_type,
-        "price": price,
-        "sl": sl,
-        "tp": tp,
-        "deviation": DEVIATION,
-        "magic": 123456,
-        "comment": f"Python MT5 Bot {action}",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_FOK,
-    }
+    order_request = OrderRequest(
+        symbol=symbol,
+        action=action,
+        volume=volume,
+        price=price,
+        sl=sl,
+        tp=tp,
+        deviation=DEVIATION,
+        magic=123456,
+        comment=f"Python MT5 Bot {action}",
+    )
 
     # Execute order
-    result = mt5.order_send(request)
+    try:
+        result = send_market_order(order_request)
+    except RuntimeError as exc:
+        print(f"❌ Order send failed: {exc}")
+        return False
 
     if result is None:
         print("❌ Order send failed - no result returned")
@@ -576,41 +575,25 @@ def close_position(position):
     Returns:
         bool: True if closed successfully, False otherwise
     """
-    tick = mt5.symbol_info_tick(position.symbol)
-    if tick is None:
-        print(f"❌ Could not get tick data for {position.symbol}")
+    try:
+        result = close_position_by_ticket(
+            ticket=position.ticket,
+            symbol=position.symbol,
+            volume=position.volume,
+            side="BUY" if position.type == mt5.ORDER_TYPE_BUY else "SELL",
+            deviation=DEVIATION,
+            magic=234000,
+            comment="python script close",
+        )
+    except RuntimeError as exc:
+        print(f"❌ Failed to close position #{position.ticket}: {exc}")
         return False
-
-    # Determine close price and order type
-    if position.type == mt5.ORDER_TYPE_BUY:
-        close_price = tick.bid
-        order_type = mt5.ORDER_TYPE_SELL
-        action_str = "CLOSE_BUY"
-    else:
-        close_price = tick.ask
-        order_type = mt5.ORDER_TYPE_BUY
-        action_str = "CLOSE_SELL"
-
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": position.symbol,
-        "volume": position.volume,
-        "type": order_type,
-        "position": position.ticket,
-        "price": close_price,
-        "deviation": DEVIATION,
-        "magic": 234000,
-        "comment": "python script close",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_FOK,
-    }
-
-    result = mt5.order_send(request)
 
     if result.retcode == mt5.TRADE_RETCODE_DONE:
         profit = position.profit
         commission = position.commission if hasattr(position, 'commission') else 0
         swap = position.swap if hasattr(position, 'swap') else 0
+        close_price = result.price if hasattr(result, "price") else None
 
         print(f"✅ Position #{position.ticket} closed | Profit: {profit:.2f}")
 
