@@ -77,6 +77,11 @@
     "enable_daily_limits": true,
 
     "enable_dynamic_lot_sizing": true
+  },
+
+  "market_data": {
+    "mode": "live",
+    "snapshot_path": "data/env_data.pkl"
   }
 }
 
