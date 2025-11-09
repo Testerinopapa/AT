@@ -25,9 +25,39 @@ def _delegated_agents_live_args(argv):
     return sanitized
 
 
+def _print_agents_live_examples() -> None:
+    """Display Markdown examples for the agents-live delegation path."""
+
+    message = """\
+## Agents Live quickstart
+
+The delegated `scripts.test_agents_live` harness needs an explicit symbol, date
+range, and optional LLM model. Copy one of the setups below or adapt it to your
+session:
+
+- **EURUSD — London (Europe/London)**  \
+  `python main.py --agents-live --symbol EURUSD --start 2024-02-01 --end 2024-02-07 --model minimax/minimax-m2:free --verbose`
+- **GBPUSD — New York (America/New_York)**  \
+  `python main.py --agents-live --symbol GBPUSD --start 2024-03-11 --end 2024-03-15 --model mistral/mistral-medium`
+- **USDJPY — Tokyo (Asia/Tokyo)**  \
+  `python main.py --agents-live --symbol USDJPY --start 2024-04-08 --end 2024-04-12 --model openrouter/auto`
+- **XAUUSD — Sydney (Australia/Sydney)**  \
+  `python main.py --agents-live --symbol XAUUSD --start 2024-05-06 --end 2024-05-10 --no-llm --verbose`
+
+Dates are interpreted as UTC by the integration test; adjust the window to match
+your session. Include `--no-llm` if you do not wish to call the configured LLM
+backend.
+"""
+
+    print(message)
+
+
 if __name__ == "__main__":
     delegated = _delegated_agents_live_args(sys.argv)
     if delegated is not None:
+        if len(delegated) == 1:
+            _print_agents_live_examples()
+            raise SystemExit(2)
         sys.argv = delegated
         from scripts.test_agents_live import main as _agents_live_main
 
