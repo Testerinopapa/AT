@@ -9,6 +9,36 @@ from datetime import datetime
 from pathlib import Path
 
 
+def _delegated_agents_live_args(argv):
+    """Return sanitized argv when delegating to scripts.test_agents_live."""
+
+    delegate_tokens = {"--agents-live", "agents-live", "test-agents-live"}
+    if not any(token in argv[1:] for token in delegate_tokens):
+        return None
+
+    sanitized = [argv[0]]
+    for token in argv[1:]:
+        if token in delegate_tokens:
+            continue
+        sanitized.append(token)
+
+    return sanitized
+
+
+if __name__ == "__main__":
+    delegated = _delegated_agents_live_args(sys.argv)
+    if delegated is not None:
+        sys.argv = delegated
+        from scripts.test_agents_live import main as _agents_live_main
+
+        print(
+            "[Delegation] Routing to scripts.test_agents_live. "
+            "Original main.py live trading workflow will not run."
+        )
+        _agents_live_main()
+        raise SystemExit(0)
+
+
 # Import new strategy system
 from strategies import (
     SimpleStrategy,
@@ -28,6 +58,12 @@ from agents import EnvironmentAgent
 from market_data.environment import MarketEnvironment
 
 from mt5_helpers import OrderRequest, close_position_by_ticket, send_market_order
+from trading.execution import (
+    get_open_positions as shared_get_open_positions,
+    has_open_position as shared_has_open_position,
+    can_open_new_trade as shared_can_open_new_trade,
+    log_trade as shared_log_trade,
+)
 
 
 MT5_TIMEFRAME_MAP = {
@@ -39,162 +75,6 @@ MT5_TIMEFRAME_MAP = {
     "H4": mt5.TIMEFRAME_H4,
     "D1": mt5.TIMEFRAME_D1,
 }
-
-
-def _resolve_timezone(name: str):
-    """Resolve a timezone name into a ZoneInfo object when available."""
-
-    if not name:
-        return None
-
-    if ZoneInfo is None:
-        print(
-            f"WARNING:  zoneinfo module not available; unable to localize timezone '{name}'."
-        )
-        return None
-
-    try:
-        return ZoneInfo(name)
-    except ZoneInfoNotFoundError:
-        print(f"WARNING:  Unknown timezone '{name}'. Falling back to naive datetimes.")
-        return None
-
-
-def _parse_datetime(candidate, tzinfo):
-    """Parse ISO datetime strings or timestamps into datetime objects."""
-
-    if candidate in (None, ""):
-        return None
-
-    if isinstance(candidate, (int, float)):
-        try:
-            return datetime.fromtimestamp(candidate, tz=tzinfo)
-        except (OverflowError, OSError, ValueError):
-            print(f"WARNING:  Invalid timestamp '{candidate}' in backtest history config.")
-            return None
-
-    if isinstance(candidate, str):
-        try:
-            parsed = datetime.fromisoformat(candidate)
-        except ValueError:
-            print(f"WARNING:  Unable to parse datetime string '{candidate}'.")
-            return None
-
-        if parsed.tzinfo is None and tzinfo is not None:
-            parsed = parsed.replace(tzinfo=tzinfo)
-
-        return parsed
-
-    print(f"WARNING:  Unsupported datetime value '{candidate}' ({type(candidate).__name__}).")
-    return None
-
-
-def parse_backtest_config(raw_config):
-    """Normalize backtest configuration and apply sensible defaults."""
-
-    default_timezone_name = "UTC"
-    default_timezone = _resolve_timezone(default_timezone_name)
-
-    normalized = {
-        "timeframe_key": "H1",
-        "timeframe": MT5_TIMEFRAME_MAP.get("H1", mt5.TIMEFRAME_H1),
-        "history": {
-            "start": None,
-            "start_raw": None,
-            "end": None,
-            "end_raw": None,
-            "timezone_name": default_timezone_name,
-            "timezone": default_timezone,
-            "align_to_broker_timezone": False,
-        },
-        "initial_cash": 100000.0,
-        "commission": {
-            "model": "percentage",
-            "rate": 0.0002,
-            "per_trade": 0.0,
-        },
-    }
-
-    if not isinstance(raw_config, dict):
-        return normalized
-
-    timeframe_key = str(raw_config.get("timeframe", normalized["timeframe_key"])).upper()
-    if timeframe_key not in MT5_TIMEFRAME_MAP:
-        print(
-            f"WARNING:  Unsupported backtest timeframe '{timeframe_key}'. Defaulting to {normalized['timeframe_key']}."
-        )
-        timeframe_key = normalized["timeframe_key"]
-
-    normalized["timeframe_key"] = timeframe_key
-    normalized["timeframe"] = MT5_TIMEFRAME_MAP.get(timeframe_key, normalized["timeframe"])
-
-    history_raw = raw_config.get("history", {})
-    if not isinstance(history_raw, dict):
-        history_raw = {}
-
-    timezone_name = str(
-        history_raw.get("timezone", normalized["history"]["timezone_name"])
-    )
-    timezone_obj = _resolve_timezone(timezone_name)
-
-    history = normalized["history"]
-    history["timezone_name"] = timezone_name
-    history["timezone"] = timezone_obj
-    history["align_to_broker_timezone"] = bool(
-        history_raw.get(
-            "align_to_broker_timezone", history["align_to_broker_timezone"]
-        )
-    )
-
-    history["start_raw"] = history_raw.get("start")
-    history["end_raw"] = history_raw.get("end")
-    history["start"] = _parse_datetime(history["start_raw"], timezone_obj)
-    history["end"] = _parse_datetime(history["end_raw"], timezone_obj)
-
-    try:
-        normalized["initial_cash"] = float(
-            raw_config.get("initial_cash", normalized["initial_cash"])
-        )
-    except (TypeError, ValueError):
-        print(
-            f"WARNING:  Invalid initial_cash '{raw_config.get('initial_cash')}'. Using default {normalized['initial_cash']}."
-        )
-
-    commission_raw = raw_config.get("commission", {})
-    commission_cfg = normalized["commission"]
-    if isinstance(commission_raw, dict):
-        if "model" in commission_raw:
-            commission_cfg["model"] = str(commission_raw["model"]).strip().lower()
-        if "rate" in commission_raw:
-            try:
-                commission_cfg["rate"] = float(commission_raw["rate"])
-            except (TypeError, ValueError):
-                print(
-                    f"WARNING:  Invalid commission rate '{commission_raw.get('rate')}'. Using default {commission_cfg['rate']}."
-                )
-        if "per_trade" in commission_raw:
-            try:
-                commission_cfg["per_trade"] = float(commission_raw["per_trade"])
-            except (TypeError, ValueError):
-                fallback_value = commission_cfg.get("per_trade")
-                print(
-                    "WARNING:  Invalid commission per_trade "
-                    f"'{commission_raw.get('per_trade')}'. Using default {fallback_value}."
-                )
-
-    return normalized
-
-
-def _format_history_bound(history_section, bound):
-    """Return a human-friendly representation of a history boundary."""
-
-    dt_obj = history_section.get(bound)
-    if dt_obj is not None:
-        return dt_obj.isoformat()
-
-    raw_value = history_section.get(f"{bound}_raw")
-    return raw_value if raw_value not in (None, "") else "not set"
-
 
 # ------------------------------
 # GLOBAL STATE
@@ -245,8 +125,6 @@ if MARKET_MODE not in ALLOWED_MARKET_MODES:
     MARKET_MODE = "live"
 
 SNAPSHOT_PATH = MARKET_DATA_CONFIG.get("snapshot_path", "data/env_data.pkl")
-# Decoupled: main.py does not load or use backtest config
-BACKTEST_CONFIG = {}
 
 SYMBOL = config.get("symbol", "EURUSD")
 VOLUME = float(config.get("volume", 0.1))
@@ -749,203 +627,6 @@ def load_environment_snapshots(path_str: str):
     return snapshots, candidate
 
 
-def run_backtest():
-    """Run the configured backtest using the Backtrader bridge."""
-
-    print("\n" + "=" * 80)
-
-    print("Backtest configuration preview")
-    print("=" * 80)
-    print(f"Symbol: {SYMBOL}")
-    print(f"Timeframe: {BACKTEST_CONFIG.get('timeframe_key')}")
-    print(
-        f"History window: {_format_history_bound(history_section, 'start')}"
-        f" -> {_format_history_bound(history_section, 'end')}"
-    )
-    print(
-        f"Timezone: {history_section.get('timezone_name')} | "
-        f"Align to broker: {history_section.get('align_to_broker_timezone')}"
-    )
-    print(f"Initial cash: {BACKTEST_CONFIG.get('initial_cash')}")
-
-    print("🧪 Starting Backtrader backtest")
-    print("=" * 80)
-
-
-    history_section = BACKTEST_CONFIG.get("history", {})
-    print(f"[Backtest] Timeframe: {BACKTEST_CONFIG.get('timeframe_key')}")
-    print(
-        f"[Backtest] History: {format_history_bound(history_section, 'start')}"
-        f" → {format_history_bound(history_section, 'end')}"
-    )
-    tz_label = history_section.get("timezone_name", "UTC")
-    if history_section.get("timezone") is None and tz_label:
-        tz_label = f"{tz_label} (unresolved)"
-    print(f"[Backtest] Timezone: {tz_label}")
-    print(f"[Backtest] Align to broker timezone: {history_section.get('align_to_broker_timezone')}")
-    print(f"[Backtest] Initial cash: {BACKTEST_CONFIG.get('initial_cash')}")
-    commission_cfg = BACKTEST_CONFIG.get('commission', {})
-    print(
-        "[Backtest] Commission: "
-        f"model={commission_cfg.get('model')}, rate={commission_cfg.get('rate')}, "
-        f"per_trade={commission_cfg.get('per_trade')}"
-    )
-
-    print("\nWARNING: Backtesting execution is not implemented yet. This is a configuration preview only.")
-
-
-def run_backtest_bt():
-    """Run Backtrader backtest via StrategyBridge with Yahoo data feed.
-
-    - Mirrors live decision flow using EnvironmentAgent/StrategyManager
-    - Avoids MT5 by disabling RiskManager inside the bridge
-    """
-
-    symbol = str(config.get("symbol", "EURUSD")).upper()
-    timeframe_key = BACKTEST_CONFIG.get("timeframe_key", "H1")
-    history_section = BACKTEST_CONFIG.get("history", {})
-
-    try:
-        import backtrader as bt  # type: ignore
-        # Compatibility shims for Backtrader 1.9.78
-        if not hasattr(bt.stores, "Store") and hasattr(bt.stores, "VCStore"):
-            setattr(bt.stores, "Store", bt.stores.VCStore)
-        if not hasattr(bt.brokers, "BrokerBase") and hasattr(bt.brokers, "BrokerBack"):
-            setattr(bt.brokers, "BrokerBase", bt.brokers.BrokerBack)
-        from backtesting.strategy_adapter import StrategyBridge  # type: ignore
-    except Exception as exc:
-        print(f"ERROR: Backtrader not available: {exc}")
-        return
-
-    interval_map = {
-        "M1": "1m",
-        "M5": "5m",
-        "M15": "15m",
-        "M30": "30m",
-        "H1": "1h",
-        "H4": "1h",
-        "D1": "1d",
-    }
-    yf_interval = interval_map.get(str(timeframe_key).upper(), "1h")
-
-    # Fetch data from Yahoo Finance
-    df = None
-    try:
-        import yfinance as yf  # type: ignore
-        start = history_section.get("start")
-        end = history_section.get("end")
-        ticker = "EURUSD=X" if symbol == "EURUSD" else symbol
-        if start and end:
-            df = yf.download(ticker, start=start, end=end, interval=yf_interval, auto_adjust=False, progress=False)
-        else:
-            period = "7d" if yf_interval != "1d" else "30d"
-            df = yf.download(ticker, period=period, interval=yf_interval, auto_adjust=False, progress=False)
-    except Exception as exc:
-        print(f"ERROR: Failed to fetch data for backtest: {exc}")
-
-    if df is None or getattr(df, "empty", True):
-        # Fallback: try recent 7 days for intraday intervals
-        try:
-            import yfinance as yf  # type: ignore
-            ticker = "EURUSD=X" if symbol == "EURUSD" else symbol
-            df = yf.download(ticker, period="7d", interval=yf_interval, auto_adjust=False, progress=False)
-            if df is None or getattr(df, "empty", True):
-                print("ERROR: No historical data available for backtest.")
-                return
-            else:
-                print("[Backtest] Falling back to last 7 days due to provider limits.")
-        except Exception:
-            print("ERROR: No historical data available for backtest.")
-            return
-
-    # Flatten possible MultiIndex columns from Yahoo and standardize names
-    df = df.dropna()
-    if hasattr(df, "columns") and any(isinstance(c, tuple) for c in df.columns):
-        cols = []
-        for c in df.columns:
-            if isinstance(c, tuple):
-                name = None
-                for part in c:
-                    if str(part).lower() in {"open", "high", "low", "close", "adj close", "volume"}:
-                        name = str(part)
-                        break
-                cols.append(name or str(c[0]))
-            else:
-                cols.append(str(c))
-        df.columns = cols
-    rename = {"Adj Close": "Close", "adj close": "Close"}
-    df = df.rename(columns=rename)
-    if not set(["Open", "High", "Low", "Close", "Volume"]).issubset(set(df.columns)):
-        print("ERROR: Data does not include OHLCV columns after normalization.")
-        return
-    data = bt.feeds.PandasData(dataname=df[["Open", "High", "Low", "Close", "Volume"]])
-
-    initial_cash = float(BACKTEST_CONFIG.get("initial_cash", 100000.0))
-    commission_cfg = BACKTEST_CONFIG.get("commission", {})
-    rate = float(commission_cfg.get("rate", 0.0) or 0.0)
-
-    cerebro = bt.Cerebro()
-    cerebro.broker.set_cash(initial_cash)
-    if rate > 0:
-        cerebro.broker.setcommission(commission=rate)
-    cerebro.adddata(data, name=f"{symbol}-{timeframe_key}")
-
-    cerebro.addstrategy(
-        StrategyBridge,
-        strategy_manager=STRATEGY_MANAGER,
-        symbol=symbol,
-        trade_logger=TRADE_LOGGER,
-        risk_manager=None,
-        analytics=ANALYTICS,
-        agent_kwargs=dict(memory_limits={"short": 64, "mid": 48, "long": 32}),
-        default_volume=float(config.get("volume", 0.1)),
-    )
-
-    print("\n" + "=" * 80)
-    print("Running Backtrader backtest via StrategyBridge")
-    print("=" * 80)
-    print(f"Symbol: {symbol}")
-    print(f"Timeframe: {timeframe_key} (Yahoo: {yf_interval})")
-    print(
-        "History window: "
-        f"{_format_history_bound(history_section, 'start')} "
-        f"-> {_format_history_bound(history_section, 'end')}"
-    )
-    print(f"Initial cash: {initial_cash:.2f} | Commission rate: {rate}")
-
-    try:
-        cerebro.run(stdstats=False)
-        print(f"[Backtest] Completed. Portfolio value: {cerebro.broker.getvalue():.2f}")
-    except Exception as exc:
-        print(f"ERROR: Backtest execution failed: {exc}")
-    print(
-        "\nWARNING:  Backtesting execution is not implemented yet. "
-        "This is a configuration preview only."
-    )
-
-
-    try:
-        run_backtest_workflow(
-            config=config,
-            strategy_manager=STRATEGY_MANAGER,
-            risk_manager=RISK_MANAGER,
-            trade_logger=TRADE_LOGGER,
-            analytics=ANALYTICS,
-        )
-    except Exception as exc:
-        print(f"❌ Backtest execution failed: {exc}")
-        raise
-    finally:
-        print("\n🔚 MT5 connection closed.")
-        mt5.shutdown()
-        if hasattr(TRADE_LOGGER, "text_log"):
-            try:
-                with open(TRADE_LOGGER.text_log, "a"):
-                    pass
-            except OSError:
-                print("⚠️  Unable to touch trade log file during shutdown.")
-
-
 
 def run_snapshot_replay():
     """Replay pre-collected market environment snapshots."""
@@ -1056,6 +737,11 @@ if __name__ == "__main__":
         print("Backtesting is handled by CLI scripts. Try:")
         print("  python scripts/run_backtest.py --symbol EURUSD --period 7 --interval 1h")
         print("Or use your own CSV:  python scripts/run_backtest.py --source csv --csv <path>")
+        print("For the agents+LLM integration harness, run:")
+        print(
+            "  python -m scripts.test_agents_live --symbol EURUSD --start 2024-02-01 --end 2024-02-07"
+        )
+        print("  (alias: python main.py --agents-live --symbol EURUSD --start 2024-02-01 --end 2024-02-07)")
     elif ENABLE_CONTINUOUS:
         # Live trading (continuous loop) via MetaTrader 5
         run_continuous_trading()
